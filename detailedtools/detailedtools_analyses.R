@@ -98,6 +98,8 @@ nrow(detseq_o)
 # filter to the best of the best (where individuals are known), of course should still check as many unidentified ones as possible
 # also exclude splits
 detseq_oi <- detseq_o[!detseq_o$subjectID %in% c("adultmale", "subadultmale", "juvenileunknown") & detseq_o$split == FALSE,]
+# exclude ones were we missed all pounds (so n_pounds = NA)
+detseq_oi <- detseq_oi[!is.na(detseq_oi$n_pounds) == TRUE,]
 # then end up with 1199 sequences
 
 #### 1. Sequence duration #####
@@ -220,7 +222,7 @@ ggplot(detseq_oi, aes(y = seqduration, x = n_pounds, color = Age, shape = Age)) 
 # Model 2a: Number of pounds depending on age, including item, anviltype, and individual ID as random effect, and sequence duration as offset
 m_e2a <- brm(n_pounds ~ Age + item*anviltype + (1|subjectID) + offset(log(seqduration)), data = detseq_oi, family = "poisson", iter = 1000, chain = 2, core = 2, backend = "cmdstanr")
 # save and load model
-# saveRDS(m_e2a, "detailedtools/RDS/m_e2a.rds")
+ saveRDS(m_e2a, "detailedtools/RDS/m_e2a.rds")
 # m_e2a <- readRDS("detailedtools/RDS/m_e2a.rds")
 
 # diagnostics
@@ -269,7 +271,7 @@ plot(testdist3.1)
 ## ZERO-INFLATED POISSON
 m_e3a <- brm(n_miss ~ Age + item*anviltype + (1|subjectID), data = detseq_o, family = zero_inflated_poisson, iter = 1000, chain = 2, core = 2, backend = "cmdstanr", control = list(adapt_delta = 0.99))
 # saving and loading model
-# saveRDS(m_e3a, "detailedtools/RDS/m_e3a.rds")
+ saveRDS(m_e3a, "detailedtools/RDS/m_e3a.rds")
 # m_e3a <- readRDS("detailedtools/RDS/m_e3a.rds")
 
 # diagnostics
@@ -384,7 +386,7 @@ ggplot(detseq_o2, aes(x=subjectID, y=n_flies, color = Age, fill = Age)) +
   geom_violin(alpha = 0.4) + geom_text(aes(y = 7.5, x = subjectID, label = nrow)) +
   scale_fill_viridis_d(option = "plasma", end = 0.8) +
   scale_color_viridis_d(option = "plasma", end = 0.8) +
-  labs(x = "Age", y = "Average number of mistakes per tool use sequence") +
+  labs(x = "Age", y = "Average number of item flying per tool use sequence") +
   theme_bw() + theme(axis.text = element_text(size = 12),
                      axis.title = element_text(size = 14)) 
 
@@ -392,7 +394,7 @@ ggplot(detseq_o2, aes(x=subjectID, y=n_hloss, color = Age, fill = Age)) +
   geom_violin(alpha = 0.4) + geom_text(aes(y = 7.5, x = subjectID, label = nrow)) +
   scale_fill_viridis_d(option = "plasma", end = 0.8) +
   scale_color_viridis_d(option = "plasma", end = 0.8) +
-  labs(x = "Age", y = "Average number of mistakes per tool use sequence") +
+  labs(x = "Age", y = "Average number of hammer loss per tool use sequence") +
   theme_bw() + theme(axis.text = element_text(size = 12),
                      axis.title = element_text(size = 14)) 
 
@@ -400,7 +402,7 @@ ggplot(detseq_o2, aes(x=subjectID, y=n_miss, color = Age, fill = Age)) +
   geom_violin(alpha = 0.4) + geom_text(aes(y = 7.5, x = subjectID, label = nrow)) +
   scale_fill_viridis_d(option = "plasma", end = 0.8) +
   scale_color_viridis_d(option = "plasma", end = 0.8) +
-  labs(x = "Age", y = "Average number of mistakes per tool use sequence") +
+  labs(x = "Age", y = "Average number of misstrikes per tool use sequence") +
   theme_bw() + theme(axis.text = element_text(size = 12),
                      axis.title = element_text(size = 14)) 
 

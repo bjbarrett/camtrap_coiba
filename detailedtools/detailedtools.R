@@ -19,9 +19,18 @@ dettools1 <- read.csv("detailedtools/ZGdetailedtoolscoding.csv")
 # Meredith's csv
 dettools2 <- read.csv("detailedtools/EXP-ANV-01-R11_MC.csv")
 # Leonie's csv
-dettools3 <- read.csv("detailedtools/CEBUS-02-R11_2022_LRdetailedtoolscoding.csv")
+dettools3 <- read.csv("detailedtools/CEBUS-02-R11_R12_2022_LRdetailedtoolscoding.csv")
 
 # bind all three datasets together (after making sure they have the same number and order of columns)
+# TEMPORARY until we are all on same version
+new_cols <- names(dettools1)[!names(dettools1) %in% names(dettools2)]
+old_cols <- names(dettools2)[!names(dettools2) %in% names(dettools1)]
+
+dettools1 <- dettools1[, !names(dettools1) %in% new_cols] 
+dettools2 <- dettools2[, !names(dettools2) %in% old_cols]
+dettools3 <- dettools3[, !names(dettools3) %in% old_cols]
+## END OF TEMPORARY
+
 dettools <- rbind(dettools1, dettools2, dettools3)
 # sort so that observations from the same video are clustered together and it's chronological
 dettools <- dettools[order(dettools$Observation.id),]
@@ -35,7 +44,9 @@ dettools_r <- data.frame("videoID" = dettools$Observation.id, "codingdate" = det
 
 # take out Zoë's coding of "female" tool use for other project
 # note: if we have any other test sequences, we can filter them out here
-dettools_r <- dettools_r[!dettools_r$videoID == "femaletooluse1",]
+# for now also filtering out Leonie's sequence where BAL was processing two almendras at once alternating between them
+flags <- dettools_r$videoID[which(str_detect(dettools_r$videoID, "femaletooluse1|test|double") == TRUE)]
+dettools_r <- dettools_r[!dettools_r$videoID %in% flags,]
 
 ### Create unique sequence ID #### 
 # Sequence ID that is same for sequences continuing across multiple videos
@@ -47,7 +58,7 @@ dettools_r$behavior[which(str_detect(dettools_r$modifier1, "cont") == TRUE)] <- 
 
 # create ascending number for each sequence
 curseq <- 1
-cache <- 1
+cache <- 0
 dettools_r$seqnumber <- NA
 
 for (i in 1:nrow(dettools_r)) {
@@ -68,6 +79,9 @@ for (i in 1:nrow(dettools_r)) {
 
 # check for NAs
 dettools_r[is.na(dettools_r$seqnumber) == TRUE,]
+# check for focalsubjects not coded or unknown
+unknownIDs <- unique(dettools_r$videoID[which(dettools_r$subjectID == "No focal subject" | dettools_r$subjectID == "unknown")])
+mistakenIDs <- dettools_r[dettools_r$videoID %in% unknownIDs,]
 
 # combine with location and date to get unique seq_ID
 dettools_r$location <- ifelse(str_detect(dettools_r$videoID, "EXP-ANV") == TRUE, "EXP-ANV-01", "CEBUS-02")
@@ -110,7 +124,7 @@ hammers$hammerID[! hammers$hammerID %in% c("FRE", "unmarked", "BAM", "PEB", "unk
 blank <- hammers$sequenceID[which(hammers$hammerID == "")]
 blank_videonames_ZG <- unique(dettools_r$videoID[which(dettools_r$sequenceID %in% blank & dettools_r$coder == "ZG")])
 blank_videonames_MKWC <- unique(dettools_r$videoID[which(dettools_r$sequenceID %in% blank & dettools_r$coder == "MKWC")])
-blank_videonames_LC <- unique(dettools_r$videoID[which(dettools_r$sequenceID %in% blank & dettools_r$coder == "LC")])
+blank_videonames_LR <- unique(dettools_r$videoID[which(dettools_r$sequenceID %in% blank & dettools_r$coder == "LR")])
 
 seqdat <- left_join(seqdat, hammers, "sequenceID")
 ftable(seqdat$hammerID)
@@ -375,4 +389,4 @@ dettools_r2 <- dettools_r2[,c("videoID", "codingdate", "medianame", "videolength
                               "videostart", "videoend", "seqduration", "n_pounds", "n_miss", 
                               "n_flies", "n_hloss", "n_misstotal", "n_itemreposit", "n_hamreposit", "n_peel",
                               "n_reposit", "Age", "Sex", "split", "age_of", "deployment")]
-#saveRDS(dettools_r2, "detailedtools/RDS/dettools_r2.rds")
+#saveRDS(dettools_r2, "detailedtools/RDS/dettools_r2.rds"
