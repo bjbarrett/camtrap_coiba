@@ -245,13 +245,23 @@ agoutigross$nMales <- agoutigross$nAM + agoutigross$nSM + agoutigross$nJM + agou
 ##### Inspections #####
 # add nr or capuchins inspecting camera trap
 agoutigross_capinsp <- agoutigross[agoutigross$capuchin == 1 & str_detect(agoutigross$behaviour, "Inspecting"), ]
-cap_numbers_insp <- agoutigross_capinsp %>%
+# nr of adults inspecting
+cap_numbers_insp_ad <- agoutigross_capinsp[agoutigross_capinsp$lifeStage == "adult",] %>%
   dplyr::count(sequenceID)
-colnames(cap_numbers_insp) <- c("sequenceID", "n_inspect")
-head(cap_numbers_insp)
+colnames(cap_numbers_insp_ad) <- c("sequenceID", "n_inspect_adult")
+head(cap_numbers_insp_ad)
+# nr of non-adults (juveniles + subadults)
+cap_numbers_insp_nonad <- agoutigross_capinsp[agoutigross_capinsp$lifeStage == "juvenile" | agoutigross_capinsp$lifeStage == "subadult",] %>%
+  dplyr::count(sequenceID)
+colnames(cap_numbers_insp_nonad) <- c("sequenceID", "n_inspect_nonadult")
+# nr of unknowns
+cap_numbers_insp_unknown <- agoutigross_capinsp[agoutigross_capinsp$lifeStage == "unknown",] %>%
+  dplyr::count(sequenceID)
+colnames(cap_numbers_insp_unknown) <- c("sequenceID", "n_inspect_unknown")
 
-agoutigross <- left_join(agoutigross, cap_numbers_insp, "sequenceID")
-agoutigross$n_inspect[is.na(agoutigross$n_inspect)] <- 0
+agoutigross <- left_join(agoutigross, cap_numbers_insp_ad, "sequenceID")
+agoutigross <- left_join(agoutigross, cap_numbers_insp_nonad, "sequenceID")
+agoutigross <- left_join(agoutigross, cap_numbers_insp_unknown, "sequenceID")
 
 ##### Displacements #####
 # info we'd like to have for analyses and need to extract now
@@ -470,7 +480,10 @@ agoutigross <- agoutigross %>%
                  "sc_nAF", "sc_nAM", "sc_nAU", "sc_nJF", "sc_nJM", "sc_nJU", "sc_nSF", "sc_nSM", "sc_nSU", 
                  "sc_nUF", "sc_nUM", "sc_nUU", "ad_nAF", "ad_nAM", "ad_nAU", "ad_nJF", "ad_nJM", "ad_nJU", "ad_nSF", 
                  "ad_nSM", "ad_nSU", "ad_nUF", "ad_nUM", "ad_nUU", "nAF_infant", "nAM_infant", "nAU_infant", "nJF_infant", "nJM_infant", "nJU_infant", "nSF_infant", "nSM_infant", "nSU_infant", 
-                 "nUF_infant", "nUM_infant", "nUU_infant", "n_neckinfant"), ~replace_na(.,0))
+                 "nUF_infant", "nUM_infant", "nUU_infant", "n_neckinfant", "n_inspect_adult", "n_inspect_nonadult", "n_inspect_unknown"), ~replace_na(.,0))
+
+# make total inspect variable
+agoutigross$n_inspect <- agoutigross$n_inspect_adult + agoutigross$n_inspect_nonadult + agoutigross$n_inspect_unknown
 
 ### at this point can FILTER OUR THE BLANKS
 # remove all timelapse triggers
