@@ -222,7 +222,7 @@ ggplot(detseq_oi, aes(y = seqduration, x = n_pounds, color = Age, shape = Age)) 
 # Model 2a: Number of pounds depending on age, including item, anviltype, and individual ID as random effect, and sequence duration as offset
 m_e2a <- brm(n_pounds ~ Age + item*anviltype + (1|subjectID) + offset(log(seqduration)), data = detseq_oi, family = "poisson", iter = 1000, chain = 2, core = 2, backend = "cmdstanr")
 # save and load model
- saveRDS(m_e2a, "detailedtools/RDS/m_e2a.rds")
+# saveRDS(m_e2a, "detailedtools/RDS/m_e2a.rds")
 # m_e2a <- readRDS("detailedtools/RDS/m_e2a.rds")
 
 # diagnostics
@@ -515,7 +515,7 @@ ggplot(detseq_o2, aes(x=subjectID, y=n_reposit, color = Age, fill = Age)) +
 
 ### Exploring individual variation and development ####
 
-# focus only on identifiable individuals and data from EXP-ANV-01 R11 (which is complete)
+# focus only on identifiable individuals and data from R11 (which is complete)
 detseq_o2c <- detseq_o2[detseq_o2$deployment == "R11",]
 ftable(detseq_o2c$item)
 ftable(detseq_o2c$subjectID)
@@ -523,11 +523,11 @@ ftable(detseq_o2c$subjectID)
 detseq_o2c$subjectID <- factor(detseq_o2c$subjectID, levels = c("ZIM", "PEA", "BAL", "TER", "MIC", "LAR", "SPT", "TOM", "SMG"))
 
 ## What items they process over time
-ggplot(detseq_o2c[detseq_o2c$location == "EXP-ANV-01",], aes(x = mediadate, fill = item)) + geom_histogram() + facet_wrap(~ subjectID) + theme_bw()
+ggplot(detseq_o2c, aes(x = mediadate, fill = item)) + geom_histogram() + facet_wrap(~ subjectID) + theme_bw()
 
 # old plot showing change in n_pound, n_miss and n_reposit (but not accounting for itemtype)
 ggplot(detseq_o2c[detseq_o2c$location == "EXP-ANV-01",]) + geom_smooth(aes(x = mediadate, y = n_miss, color = "n_miss")) + geom_smooth(aes(x = mediadate, y = n_pounds, color = "n_pounds")) + 
-  geom_smooth(aes(x = mediadate, y = n_itemreposit,  color = "n_repositions"))  + facet_wrap(~subjectID, scales = "free")  + theme_bw() + scale_color_manual("", breaks = c("n_miss", "n_pounds", "n_repositions"),
+  geom_smooth(aes(x = mediadate, y = n_itemreposit,  color = "n_repositions"))  + facet_wrap(~subjectID)  + theme_bw() + scale_color_manual("", breaks = c("n_miss", "n_pounds", "n_repositions"),
                                                                                                                                                              values = c("red", "blue", "green"))
 
 # how n_pounds changes over time, but ideally staying within each itemtype.
@@ -553,8 +553,10 @@ ggplot(detseq_o2c[detseq_o2c$item == c("almendrabrown"),]) + geom_point(aes(x = 
 ggplot(detseq_o2c[detseq_o2c$item == c("almendrabrown"),]) + geom_point(aes(x = mediadate, y = n_pounds, color = "Pounds"), shape = 16, alpha = 0.4, size = 3) + 
   geom_point(aes(x = mediadate, y = n_itemreposit, color = "Item repositions"), shape = 17, alpha = 0.4, size = 3) + geom_smooth(aes(x = mediadate, y = n_pounds, color = "Pounds")) +  
   geom_smooth(aes(x = mediadate, y = n_itemreposit, color = "Item repositions")) + 
-  facet_wrap(~subjectID, scales = "free_y") + theme_bw() + ggtitle("Brown Almendra") + scale_color_manual("", breaks = c("Pounds", "Item repositions"),
-                                                                                                          values = c("blue", "darkred")) +
+  geom_point(aes(x = mediadate, y = n_miss, color = "Misses"), shape = 18, alpha = 0.4, size = 3) + geom_smooth(aes(x = mediadate, y = n_pounds, color = "Pounds")) +  
+  geom_smooth(aes(x = mediadate, y = n_miss, color = "Misses")) +
+  facet_wrap(~subjectID, scales = "free_y") + theme_bw() + ggtitle("Brown Almendra") + scale_color_manual("", breaks = c("Pounds", "Misses", "Item repositions"),
+                                                                                                          values = c("blue", "darkred", "darkgreen")) +
   labs(x = "Date", y = "Number per sequence") +theme(axis.text = element_text(size = 12),  axis.title = element_text(size = 14)) 
 
 # comparing n_pounds, n_miss, n_reposit for known individuals
@@ -602,6 +604,8 @@ ggplot(data = dettools_r2oi[dettools_r2oi$behavior == "pound" & dettools_r2oi$po
 dettools_r2oi$behavior[which(dettools_r2oi$behavior == "pound")] <- ifelse(dettools_r2oi$poundtype[which(dettools_r2oi$behavior == "pound")] =="stand", "standpound", 
                                  ifelse(dettools_r2oi$poundtype[which(dettools_r2oi$behavior == "pound")] == "crouch", "crouchpound", "jumppound"))
 dettools_r2oi$behavior[which(dettools_r2oi$behavior == "reposit")] <- ifelse(dettools_r2oi$repostype[which(dettools_r2oi$behavior == "reposit")] == "peel", "peel", "reposit")
+
+ftable(dettools_r2oi$behavior)
 
 ## sunburst
 require(sunburstR)
