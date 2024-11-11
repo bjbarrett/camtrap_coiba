@@ -40,7 +40,7 @@ ggplot(detseq_o, aes(x=coder, y=n_pounds)) +
 # now looking only at EXP-ANV-01-R11 as that is the only one fully coded
 # later could look at all sites/times
 # for this plot exclude really rare items
-ggplot(detseq[detseq$deployment == "R11" & detseq$location == "EXP-ANV-01" & 
+ggplot(detseq[detseq$location == "CEBUS-02" & 
                 detseq$item %in% c("almendrabrown", "almendragreen", "almendraunknown", "almendrared"),], 
        aes(x = mediadate, fill = item)) + geom_histogram() + theme_bw() + facet_wrap(~item)
 
@@ -94,13 +94,13 @@ alm_plot + theme_bw()
 # definitely include whether it was split yes/no as a random effect/fixed effect 
 
 nrow(detseq_o)
-# so at the moment have 1341 sequences
+# so at the moment have 2184 sequences
 # filter to the best of the best (where individuals are known), of course should still check as many unidentified ones as possible
 # also exclude splits
 detseq_oi <- detseq_o[!detseq_o$subjectID %in% c("adultmale", "subadultmale", "juvenileunknown") & detseq_o$split == FALSE,]
 # exclude ones were we missed all pounds (so n_pounds = NA)
 detseq_oi <- detseq_oi[!is.na(detseq_oi$n_pounds) == TRUE,]
-# then end up with 1199 sequences
+# then end up with 1938 sequences
 
 #### 1. Sequence duration #####
 
@@ -271,7 +271,7 @@ plot(testdist3.1)
 ## ZERO-INFLATED POISSON
 m_e3a <- brm(n_miss ~ Age + item*anviltype + (1|subjectID), data = detseq_o, family = zero_inflated_poisson, iter = 1000, chain = 2, core = 2, backend = "cmdstanr", control = list(adapt_delta = 0.99))
 # saving and loading model
- saveRDS(m_e3a, "detailedtools/RDS/m_e3a.rds")
+# saveRDS(m_e3a, "detailedtools/RDS/m_e3a.rds")
 # m_e3a <- readRDS("detailedtools/RDS/m_e3a.rds")
 
 # diagnostics
@@ -476,7 +476,7 @@ ggplot(data = m_type_pred4b, aes(x = Age, y = .epred)) + geom_violin(aes(color =
 m_e4c <- brm(n_peel ~ Age + item*anviltype + (1|subjectID), data = detseq_oi, family = "poisson", iter = 1000, chain = 2, core = 2, backend = "cmdstanr")
 # saving and loading model
 # saveRDS(m_e4c, "detailedtools/RDS/m_e4c.rds")
-# readRDS("detailedtools/RDS/m_e4c.rds")
+# m_e4c <- readRDS("detailedtools/RDS/m_e4c.rds")
 
 # diagnostics
 summary(m_e4c)
@@ -498,7 +498,7 @@ ggplot(data = m_type_pred4c, aes(x = Age, y = .epred)) + geom_violin(aes(color =
   scale_fill_viridis_d(option = "plasma", end = 0.8) +
   scale_color_viridis_d(option = "plasma", end = 0.8) +
   guides(color = "none", fill = "none") +
-  labs(x = "Age", y = "Average number of repositions per sequence") +
+  labs(x = "Age", y = "Average number of peels per sequence") +
   theme_bw() + theme(axis.text = element_text(size = 12),
                      axis.title = element_text(size = 14)) 
 
@@ -523,12 +523,12 @@ ftable(detseq_o2c$subjectID)
 detseq_o2c$subjectID <- factor(detseq_o2c$subjectID, levels = c("ZIM", "PEA", "BAL", "TER", "MIC", "LAR", "SPT", "TOM", "SMG"))
 
 ## What items they process over time
-ggplot(detseq_o2c, aes(x = mediadate, fill = item)) + geom_histogram() + facet_wrap(~ subjectID) + theme_bw()
+ggplot(detseq_o2c, aes(x = month(mediadate), fill = item)) + geom_histogram() + facet_wrap(~ subjectID) + theme_bw()
 
 # old plot showing change in n_pound, n_miss and n_reposit (but not accounting for itemtype)
-ggplot(detseq_o2c[detseq_o2c$location == "EXP-ANV-01",]) + geom_smooth(aes(x = mediadate, y = n_miss, color = "n_miss")) + geom_smooth(aes(x = mediadate, y = n_pounds, color = "n_pounds")) + 
+ggplot(detseq_o2c[detseq_o2c$location == "EXP-ANV-01",]) + geom_smooth(aes(x = mediadate, y = n_miss, color = "n_miss")) + geom_smooth(aes(x = mediadate, y = n_pounds, color = "n_pounds")) + ylim(0,15) +
   geom_smooth(aes(x = mediadate, y = n_itemreposit,  color = "n_repositions"))  + facet_wrap(~subjectID)  + theme_bw() + scale_color_manual("", breaks = c("n_miss", "n_pounds", "n_repositions"),
-                                                                                                                                                             values = c("red", "blue", "green"))
+                                                                                                                                                       values = c("red", "blue", "green"))
 
 # how n_pounds changes over time, but ideally staying within each itemtype.
 ggplot(detseq_o2c[detseq_o2c$item == c("almendrabrown"),]) + geom_point(aes(x = mediadate, y = n_pounds, shape = location), alpha = 0.4, color = "brown", size = 3) + geom_smooth(aes(x = mediadate, y = n_pounds), color = "brown") + 
@@ -585,6 +585,124 @@ dev_gam1 <- gam(n_pounds ~ s(time, by = Age_f) + Age_f + s(subjectID_F, bs = "re
 summary(dev_gam1)
 draw(dev_gam1)
 plot(dev_gam1)
+
+# in brms (trial)
+dev_gam1b <- brm(n_pounds ~ s(time, by = Age_f) + Age_f + s(subjectID_F, bs = "re"), data=detseq_o2[detseq_o2$item == "almendrabrown",], family="poisson", 
+               chains=2, cores = 4, backend = "cmdstanr", save_pars = save_pars(all = TRUE),
+               iter = 1000)
+# saving and loading model
+# saveRDS(dev_gam1b, "detailedtools/RDS/dev_gam1b.rds")
+# dev_gam1b <- readRDS("detailedtools/RDS/dev_gam1b.rds")
+plot(conditional_smooths(dev_gam1b))
+plot(conditional_effects(dev_gam1b))
+
+
+### What is ABE doing? ###
+# do we see ABE use tools at all in this dataset?
+head(dettools_r2)
+head(detseq)
+ftable(detseq$subjectID)
+# we don't see ABE use tools in this dataset at all (INK also does it much less...)
+
+# sidenote: does ABE use tools in agouti data? 
+head(agoutisequence_c)
+str(agoutisequence_c)
+ftable(agoutisequence_c$name)
+# make abe subset
+ABE_only <- subset(agouticlean, agouticlean$name == "ABE (Abraham)")
+ftable(ABE_only$tooluse)
+plot(ABE_only$seq_start, ABE_only$tooluse)
+
+# do we see ABE displace/scrounge? 
+ABEcomment <- dettools_r2[str_detect(dettools_r2$comment, "ABE|Abraham"),]
+# 5 recorded instances of him displacing and scrounging
+# all displace
+displacements <- dettools_r2[dettools_r2$displacement == "anvildisp" | dettools_r2$displacement == "fulldisp" |
+dettools_r2$displacement == "hammerdisp",]
+
+ftable(dettools_r2$displacement)
+# how many of displacements is ABE?
+ftable(detseq$displacement)
+# 96 total displacements
+ftable(displacements[!duplicated(displacements$sequenceID),]$scrounging)
+ftable(detseq$scrounging)
+
+
+### Social Attention ####
+# how many sequences is someone paying social attention
+soc_att <- detseq[detseq$socatt != "None",]
+nas <- soc_att[!complete.cases(soc_att),]
+# so the NAs are from when they did not open the item so the n_pounds is not there
+# filter out when they did not open the item?
+ftable(soc_att$outcome[soc_att$socatt == "socialattention"])
+
+# maybe filter out other items than almendras? (because others are so rare) 
+# or pool together
+soc_att$item2 <- ifelse(str_detect(soc_att$item, "almendra") == FALSE, "other", soc_att$item)
+soc_att$attention <- ifelse(soc_att$socatt == "socialattention", 1, 0)
+
+table(soc_att$socatt, soc_att$displacement)
+
+#who is the tool user in these cases
+ggplot(data = soc_att[!is.na(soc_att$age_of),], aes(x = age_of, fill = attention)) + geom_histogram(stat = "count")
+# what are they processing
+ggplot(data = soc_att[str_detect(soc_att$item, "almendra") == TRUE,], aes(x = item, fill = attention)) + geom_histogram(stat = "count")
+str(soc_att)
+# more likely to pay attention with more efficient ones?
+ggplot(data = soc_att, aes(x = n_pounds, fill = attention)) + geom_histogram(stat = "count")
+str(soc_att)
+ggplot(data = soc_att, aes(x = n_misstotal, fill = attention)) + geom_histogram(stat = "count")
+soc_att$age_f <- factor(soc_att$Age, levels = c("Juvenile", "Subadult", "Adult"))
+
+
+
+# make list of videoIDs with social attention
+
+
+## binomial model predicting whether or not they pay social attention
+# first just generally, are they more likely to pay more attention to:
+# certain age classes, certain items being opened, depending on outcome, depending on location, offset of duration and random effect of who tool user was
+# with item in
+soc_att_bm1 <- brm(attention ~ age_f + item2 + outcome + offset(log(seqduration)) + (1|subjectID) + location, data = soc_att, family = bernoulli(),
+                   iter = 1000, chains=2, cores = 4, backend = "cmdstanr", save_pars = save_pars(all = TRUE))
+# saving and loading model
+# saveRDS(soc_att_bm1, "detailedtools/RDS/soc_att_bm1.rds")
+# soc_att_bm1 <- readRDS("detailedtools/RDS/soc_att_bm1.rds")
+
+summary(soc_att_bm1)
+mcmc_plot(soc_att_bm1)
+plot(conditional_effects(soc_att_bm1))
+plot(soc_att_bm1)
+
+
+# then only for when items were opened successfully and we know how efficient the tool user was (n_pounds, n_miss). 
+# more likely to pay attention to more efficient tool users? 
+soc_att_bm1b <- brm(attention ~ age_f + n_pounds + item2 +  n_misstotal + offset(log(seqduration)) + (1|subjectID) + location, data = soc_att[soc_att$outcome == "opened",], family = bernoulli(),
+                   iter = 1000, chains=2, cores = 4, backend = "cmdstanr", save_pars = save_pars(all = TRUE))
+# saving and loading model
+# saveRDS(soc_att_bm1b, "detailedtools/RDS/soc_att_bm1b.rds")
+# soc_att_bm1b <- readRDS("detailedtools/RDS/soc_att_bm1b.rds")
+
+summary(soc_att_bm1b)
+mcmc_plot(soc_att_bm1b)
+plot(conditional_effects(soc_att_bm1b))
+
+hypothesis(soc_att_bm1b, "Intercept  > Intercept + n_pounds", alpha = 0.05)
+
+# consider if interactions are interesting 
+# e.g. number of pounds * age of tool user (so more atttention to efficient subadult than adult?)
+soc_att_bm1c <- brm(attention ~ age_f* n_pounds + item2 +  n_misstotal + offset(log(seqduration)) + (1|subjectID) + location, data = soc_att[soc_att$outcome == "opened",], family = bernoulli(),
+                    iter = 1000, chains=2, cores = 4, backend = "cmdstanr", save_pars = save_pars(all = TRUE))
+# saving and loading model
+# saveRDS(soc_att_bm1c, "detailedtools/RDS/soc_att_bm1c.rds")
+# soc_att_bm1c <- readRDS("detailedtools/RDS/soc_att_bm1c.rds")
+
+summary(soc_att_bm1c)
+mcmc_plot(soc_att_bm1c)ik denk 
+plot(conditional_effects(soc_att_bm1c))
+
+hypothesis(soc_att_bm1b, "Intercept  > Intercept + n_pounds", alpha = 0.05)
+
 
 ### Technique ####
 ## Individual variation in technique
