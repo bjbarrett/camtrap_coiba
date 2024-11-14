@@ -1855,6 +1855,32 @@ ggplot(data= gridseq_ocNTUc[!gridseq_ocNTUc$obsnumber == 1,], aes(x = obsnumber,
   stat_summary(data = gridseq_ocNTUc[!gridseq_ocNTUc$obsnumber == 1,], aes(x = obsnumber, y = space), fun = mean, geom = "point", inherit.aes = FALSE, size = 3, shape = 15) +
   ggtitle("Non-tool-users")
 
+## add in TIME to previous sighting
+gridseq_ocTUc$time <- NA
+
+for(i in 2:nrow(gridseq_ocTUc)) {
+  gridseq_ocTUc$time[i] <- difftime(gridseq_ocTUc$seq_start[i],gridseq_ocTUc$seq_start[i-1], units = "m")
+}
+
+hist(gridseq_ocTUc$time)
+
+gridseq_ocNTUc$time <- NA
+
+for(i in 2:nrow(gridseq_ocNTUc)) {
+  gridseq_ocNTUc$time[i] <- difftime(gridseq_ocNTUc$seq_start[i],gridseq_ocNTUc$seq_start[i-1], units = "m")
+}
+
+hist(gridseq_ocNTUc$time)
+
+ggplot(data= gridseq_ocTUc[!gridseq_ocTUc$obsnumber == 1,], aes(x = obsnumber, y = space)) + geom_point() + geom_point(aes(col = time), alpha = 0.5) + 
+  stat_summary(data = gridseq_ocTUc[!gridseq_ocTUc$obsnumber == 1,], aes(x = obsnumber, y = space), fun = mean, geom = "point", inherit.aes = FALSE, size = 3, shape = 15) +
+  ggtitle("Tool-Users")
+
+ggplot(data= gridseq_ocNTUc[!gridseq_ocNTUc$obsnumber == 1,], aes(x = obsnumber, y = space)) + geom_point(aes(col = time), alpha = 0.5) +
+  stat_summary(data = gridseq_ocNTUc[!gridseq_ocNTUc$obsnumber == 1,], aes(x = obsnumber, y = space), fun = mean, geom = "point", inherit.aes = FALSE, size = 3, shape = 15) +
+  ggtitle("Non-tool-users")
+
+test <- gridseq_ocNTUc[c("seq_start","space","time")]
 
 ######## MAP ############
 library(mapview)
