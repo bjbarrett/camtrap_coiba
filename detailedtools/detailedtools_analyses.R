@@ -627,7 +627,6 @@ ftable(detseq$displacement)
 ftable(displacements[!duplicated(displacements$sequenceID),]$scrounging)
 ftable(detseq$scrounging)
 
-
 ### Social Attention ####
 # how many sequences is someone paying social attention
 soc_att <- detseq[detseq$socatt != "None",]
@@ -653,10 +652,19 @@ ggplot(data = soc_att, aes(x = n_pounds, fill = attention)) + geom_histogram(sta
 str(soc_att)
 ggplot(data = soc_att, aes(x = n_misstotal, fill = attention)) + geom_histogram(stat = "count")
 soc_att$age_f <- factor(soc_att$Age, levels = c("Juvenile", "Subadult", "Adult"))
-
-
+soc_att$hour <- hour(soc_att$videostart)
 
 # make list of videoIDs with social attention
+# will need to code all videos with capuchin present what their age/sex are
+# also if they don't pay social attention
+ftable(soc_att$socatt)
+socatt_vidnames <- soc_att$videoID
+# probably easiest is to code all these videos in a separate BORIS with separate ethogram
+# but with same video ID, and then left_join the information with the full dataset here
+# cause otherwise I'd need to go into the BORIS files of Meredith & Leonie which is very hard
+# ones I coded
+socatt_vidnames_ZG <- soc_att$videoID[soc_att$coder == "ZG" & soc_att$socatt == "socialattention"]
+socatt_vidnames_ZG
 
 
 ## binomial model predicting whether or not they pay social attention
@@ -698,11 +706,13 @@ soc_att_bm1c <- brm(attention ~ age_f* n_pounds + item2 +  n_misstotal + offset(
 # soc_att_bm1c <- readRDS("detailedtools/RDS/soc_att_bm1c.rds")
 
 summary(soc_att_bm1c)
-mcmc_plot(soc_att_bm1c)ik denk 
+mcmc_plot(soc_att_bm1c)
 plot(conditional_effects(soc_att_bm1c))
 
 hypothesis(soc_att_bm1b, "Intercept  > Intercept + n_pounds", alpha = 0.05)
 
+# consider doing a GAM with social attention depending on hour of the day?
+# might be non-linear relationship?
 
 ### Technique ####
 ## Individual variation in technique

@@ -24,6 +24,7 @@ library(sna)
 library(assortnet)
 library(ggnewscale)
 library(bisonR)
+library(hms)
 
 ## Notes for analyses:
 
@@ -1783,6 +1784,77 @@ frames <- frames_spatial(m,
   add_timestamps(m, type = "label") %>%
   add_progress()
 animate_frames(frames, out_file = "Oryx.movements.mp4")
+
+####### CHRONOLOGICAL SPACE #####
+# looking how far way each subsequent sequence detection is from previous one
+
+# need
+TUdistmat
+NTUdistmat
+head(gridseq_ocTU)
+head(gridseq_ocNTU)
+
+# this is all capuchin sightings of TU and NTU grid with unfamiliars removed (important!)
+
+# step one: order chronologically
+gridseq_ocTUc <- gridseq_ocTU[order(gridseq_ocTU$seq_start),]  
+gridseq_ocNTUc <- gridseq_ocNTU[order(gridseq_ocNTU$seq_start),]
+
+# make variable of distance to previous line
+# make blank variable
+gridseq_ocTUc$space <- NA
+
+for(i in 2:nrow(gridseq_ocTUc)) {
+  gridseq_ocTUc$space[i] <- TUdistmat[row.names(TUdistmat) == gridseq_ocTUc$locationName[i], colnames(TUdistmat) == gridseq_ocTUc$locationName[i-1]]
+}
+
+ftable(gridseq_ocTUc$space)
+
+test <- gridseq_ocTUc[c("locationName", "seq_start", "space"),]
+gridseq_ocTUc$hour
+gridseq_ocTUc$hms <- as_hms(gridseq_ocTUc$seq_start)
+head(gridseq_ocTUc$hms)
+
+
+# make variable of distance to previous line
+# make blank variable
+gridseq_ocNTUc$space <- NA
+
+for(i in 2:nrow(gridseq_ocNTUc)) {
+  gridseq_ocNTUc$space[i] <- NTUdistmat[row.names(NTUdistmat) == gridseq_ocNTUc$locationName[i], colnames(NTUdistmat) == gridseq_ocNTUc$locationName[i-1]]
+}
+
+ftable(gridseq_ocNTUc$space)
+
+test <- gridseq_ocNTUc[c("locationName", "seq_start", "space"),]
+gridseq_ocNTUc$hms <- as_hms(gridseq_ocNTUc$seq_start)
+head(gridseq_ocNTUc$hms)
+ggplot(data = gridseq_ocNTUc, aes(x = hms, y = space, col = seqday)) + geom_point() 
+
+ggplot(data= gridseq_ocTUc, aes(x = hms, y = space, col = seqday)) + geom_point() + geom_smooth() 
+ggplot(data= gridseq_ocTUc, aes(x = hour, y = space, col = seqday)) +  stat_summary(data = gridseq_ocTUc, aes(x = hour, y = space), fun = mean, geom = "point", inherit.aes = FALSE) 
+ggplot(data= gridseq_ocNTUc, aes(x = hour, y = space, col = seqday)) +  stat_summary(data = gridseq_ocNTUc, aes(x = hour, y = space), fun = mean, geom = "point", inherit.aes = FALSE) 
+
+## THIS NEEDS SOME WORK. i THINK YOU ALWAYS WANT TO EXCLUDE THE FIRST ONE OF A DAY? 
+# OR SET THE FIRST ONE OF A DAY TO NA AND ONLY LOOK AT DISTANCES WITHIN A DAY?
+## need to somehow do this within a day and plot than the average of all days
+# think about this. Already interesting how it looks different though, but have to wonder why that is
+
+# maybe number observations per day and then have plotted average distance?
+gridseq_ocNTUc$obsnumber <- as.numeric(ave(gridseq_ocNTUc$seqday, gridseq_ocNTUc$seqday, FUN = seq_along))
+gridseq_ocTUc$obsnumber <- as.numeric(ave(gridseq_ocTUc$seqday, gridseq_ocTUc$seqday, FUN = seq_along))
+
+ggplot(data= gridseq_ocTUc[!gridseq_ocTUc$obsnumber == 1,], aes(x = obsnumber, y = space)) + geom_point() + geom_smooth() 
+ggplot(data= gridseq_ocNTUc[!gridseq_ocNTUc$obsnumber == 1,], aes(x = obsnumber, y = space)) + geom_point() + geom_smooth() 
+
+ggplot(data= gridseq_ocTUc[!gridseq_ocTUc$obsnumber == 1,], aes(x = obsnumber, y = space)) + geom_point() + geom_point(aes(col = seqday), alpha = 0.5) + 
+  stat_summary(data = gridseq_ocTUc[!gridseq_ocTUc$obsnumber == 1,], aes(x = obsnumber, y = space), fun = mean, geom = "point", inherit.aes = FALSE, size = 3, shape = 15) +
+  ggtitle("Tool-Users")
+
+ggplot(data= gridseq_ocNTUc[!gridseq_ocNTUc$obsnumber == 1,], aes(x = obsnumber, y = space)) + geom_point(aes(col = seqday), alpha = 0.5) +
+  stat_summary(data = gridseq_ocNTUc[!gridseq_ocNTUc$obsnumber == 1,], aes(x = obsnumber, y = space), fun = mean, geom = "point", inherit.aes = FALSE, size = 3, shape = 15) +
+  ggtitle("Non-tool-users")
+
 
 ######## MAP ############
 library(mapview)
