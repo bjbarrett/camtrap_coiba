@@ -31,6 +31,7 @@ dettools2 <- dettools2[, !names(dettools2) %in% old_cols]
 dettools3 <- dettools3[, !names(dettools3) %in% old_cols]
 ## END OF TEMPORARY
 
+# for now not 2b in as there are still errors/is incomplete
 dettools <- rbind(dettools1, dettools2, dettools3)
 # sort so that observations from the same video are clustered together and it's chronological
 dettools <- dettools[order(dettools$Observation.id),]
@@ -262,7 +263,7 @@ for (i in 1:nrow(seqdat)) {
 }
 
 # left join again to get this sequence information in 
-dettools_r2 <- left_join(dettools_r2, seqdat[, c("sequenceID", "seqduration")], "sequenceID")
+dettools_r2 <- left_join(dettools_r2, seqdat[, c("sequenceID", "seqduration", "seqstart", "seqend")], "sequenceID")
 # sequence duration only makes sense as a metric of efficiency if the outcome was indeed that the item was opened, so will need to filter on that when doing these analyses (via the outcome variable)
 
 # nr of pounds
@@ -382,11 +383,18 @@ detseq <- detseq[,c("videoID", "codingdate", "medianame", "videolength", "coder"
 # dettools_r2 #
 # not aggregated, every row is a behavior, for detailed looks at the behavior in the sequences
 head(dettools_r2)
-dettools_r2 <- dettools_r2[,c("videoID", "codingdate", "medianame", "videolength", "coder", "subjectID", "behavior", "comment", 
+dettools_r2 <- dettools_r2[,c("videoID", "codingdate", "medianame", "videolength", "coder", "starttime", "subjectID", "behavior", "comment", 
                               "seqnumber", "location", "mediadate", "sequenceID", "item", "h_startloc", "h_endloc", 
                               "outcome", "displacement", "socatt", "scrounging", "poundtype", "onefoot", "overhead", "onehand", "tailsupport",
                               "mistaketype", "repostype", "hammerID2", "h_switchloc", "anviltype2", 
-                              "videostart", "videoend", "seqduration", "n_pounds", "n_miss", 
+                              "videostart", "videoend", "seqduration", "seqstart", "seqend", "n_pounds", "n_miss", 
                               "n_flies", "n_hloss", "n_misstotal", "n_itemreposit", "n_hamreposit", "n_peel",
                               "n_reposit", "Age", "Sex", "split", "age_of", "deployment")]
 #saveRDS(dettools_r2, "detailedtools/RDS/dettools_r2.rds"
+
+# Generate sample of 100 sequences for interrater reliability
+set.seed(22)
+IRseqs <- sample_n(detseq[which(detseq$coder != "LR"),], 150)
+IRvideos <- unique(dettools_r$videoID[which(dettools_r$sequenceID %in% IRseqs$sequenceID)])
+IRvideos
+

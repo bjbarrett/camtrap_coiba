@@ -100,7 +100,7 @@ nrow(detseq_o)
 detseq_oi <- detseq_o[!detseq_o$subjectID %in% c("adultmale", "subadultmale", "juvenileunknown") & detseq_o$split == FALSE,]
 # exclude ones were we missed all pounds (so n_pounds = NA)
 detseq_oi <- detseq_oi[!is.na(detseq_oi$n_pounds) == TRUE,]
-# then end up with 1938 sequences
+# then end up with 2839 sequences
 
 #### 1. Sequence duration #####
 
@@ -658,14 +658,22 @@ soc_att$hour <- hour(soc_att$videostart)
 # will need to code all videos with capuchin present what their age/sex are
 # also if they don't pay social attention
 ftable(soc_att$socatt)
-socatt_vidnames <- soc_att$videoID
 # probably easiest is to code all these videos in a separate BORIS with separate ethogram
 # but with same video ID, and then left_join the information with the full dataset here
 # cause otherwise I'd need to go into the BORIS files of Meredith & Leonie which is very hard
 # ones I coded
-socatt_vidnames_ZG <- soc_att$videoID[soc_att$coder == "ZG" & soc_att$socatt == "socialattention"]
-socatt_vidnames_ZG
+socatt_vidnames <- soc_att[,c("videoID", "coder", "subjectID", "attention", "scrounging", "displacement")]
+# filter to ones not coded yet
+# load in coding
+socatt_c <- read.csv("detailedtools/socialattentioncoding.csv")
+tocode <- socatt_vidnames[!socatt_vidnames$videoID %in% socatt_c$Observation.id,]
+tocode[101:nrow(tocode),]
+# still need to do meredith cebus-02 and last bit of leonie coding 
 
+## NOTE
+# if someone was displaced then there was someone else present (the displacer)
+# so check if we had social attention 0 but displacing yes, then need to fix that
+# make sure to override if someone coded social attention 0 but I coded 1 in the detailed coding (or have them fix it in their BORIS file)
 
 ## binomial model predicting whether or not they pay social attention
 # first just generally, are they more likely to pay more attention to:
@@ -682,6 +690,7 @@ mcmc_plot(soc_att_bm1)
 plot(conditional_effects(soc_att_bm1))
 plot(soc_att_bm1)
 
+## NOTE: if we want to include subject ID as random effect, need to exclude the unknowns (or ID them!)
 
 # then only for when items were opened successfully and we know how efficient the tool user was (n_pounds, n_miss). 
 # more likely to pay attention to more efficient tool users? 
