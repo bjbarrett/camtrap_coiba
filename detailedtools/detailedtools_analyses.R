@@ -667,7 +667,7 @@ socatt_vidnames <- soc_att[,c("videoID", "coder", "subjectID", "attention", "scr
 # load in coding
 socatt_c <- read.csv("detailedtools/socialattentioncoding.csv")
 tocode <- socatt_vidnames[!socatt_vidnames$videoID %in% socatt_c$Observation.id,]
-tocode[101:nrow(tocode),]
+tocode[0:nrow(tocode),]
 # still need to do meredith cebus-02 and last bit of leonie coding 
 
 ## NOTE
