@@ -628,11 +628,7 @@ ftable(displacements[!duplicated(displacements$sequenceID),]$scrounging)
 ftable(detseq$scrounging)
 
 ### Social Attention ####
-# how many sequences is someone paying social attention
-soc_att <- detseq[detseq$socatt != "None",]
-nas <- soc_att[!complete.cases(soc_att),]
-# so the NAs are from when they did not open the item so the n_pounds is not there
-# filter out when they did not open the item?
+# what is outcome when individuals are paying social attention
 ftable(soc_att$outcome[soc_att$socatt == "socialattention"])
 
 # maybe filter out other items than almendras? (because others are so rare) 
@@ -654,13 +650,6 @@ ggplot(data = soc_att, aes(x = n_misstotal, fill = attention)) + geom_histogram(
 soc_att$age_f <- factor(soc_att$Age, levels = c("Juvenile", "Subadult", "Adult"))
 soc_att$hour <- hour(soc_att$videostart)
 
-# make list of videoIDs with social attention
-# will need to code all videos with capuchin present what their age/sex are
-# also if they don't pay social attention
-ftable(soc_att$socatt)
-# probably easiest is to code all these videos in a separate BORIS with separate ethogram
-# but with same video ID, and then left_join the information with the full dataset here
-# cause otherwise I'd need to go into the BORIS files of Meredith & Leonie which is very hard
 # ones I coded
 socatt_vidnames <- soc_att[,c("videoID", "coder", "subjectID", "attention", "scrounging", "displacement")]
 # filter to ones not coded yet
@@ -668,7 +657,12 @@ socatt_vidnames <- soc_att[,c("videoID", "coder", "subjectID", "attention", "scr
 socatt_c <- read.csv("detailedtools/socialattentioncoding.csv")
 tocode <- socatt_vidnames[!socatt_vidnames$videoID %in% socatt_c$Observation.id,]
 tocode[0:nrow(tocode),]
-# still need to do meredith cebus-02 and last bit of leonie coding 
+
+
+
+## first look at the detailed social attention coding
+head(socatt_seq)
+head(socatt_ct)
 
 ## NOTE
 # if someone was displaced then there was someone else present (the displacer)

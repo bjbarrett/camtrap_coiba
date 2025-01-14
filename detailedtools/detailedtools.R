@@ -8,6 +8,9 @@ library(stringr)
 library(dplyr)
 library(tidyr)
 library(ggplot2)
+require(DescTools)
+library(reshape2)
+library(data.table)
 
 ## NOTE: add code about catching when anvil type switches (e.g. if it's wooden anvil at comment seq_start, or when they switch back to stone/wood)
 ## NOTE: check how to extract end location of second hammer when they switch (code hammerend loc again?)
@@ -369,6 +372,164 @@ detseq <- left_join(detseq, seqdat[,c("sequenceID", "hammerswitches", "anvilswit
 # add a pound if the hammerstone was "inhand" or if there is a split
 detseq$n_pounds[which(detseq$h_startloc == "inhand" | detseq$split == TRUE)] <- detseq$n_pounds[which(detseq$h_startloc == "inhand" | detseq$split == TRUE)] + 1
 
+### Integrate social attention coding ####
+# coded in more detail who is present, who displaces, who scrounges, and who pays social attention (and when)
+# can do more with this, but for now will extract per sequence this basic additional info
+# can have both extra info on the sequence level, and more detailed on the social attention level
+# think about it
+
+# first filter to relevant part of dataset 
+# which is all sequences where there were capuchins present (so not "none" for social attention)
+soc_att <- detseq[detseq$socatt != "None",]
+nas <- soc_att[!complete.cases(soc_att),]
+
+# maybe work with behavior-level dataframe?
+socatt_l <- dettools_r2[which(dettools_r2$sequenceID %in% soc_att$sequenceID),]
+
+# load in social attention coding of these sequences
+socatt_c <- read.csv("detailedtools/socialattentioncoding.csv")
+# exclude "double" coded sequences where BAL processed two at the same time
+socatt_c <- socatt_c[!str_detect(socatt_c$Observation.id, "double") == TRUE,]
+head(socatt_c)
+# clean similarly to detailed tool output
+socatt_c <- socatt_c[order(socatt_c$Observation.id),]
+socatt_c <- data.frame("videoID" = socatt_c$Observation.id, "codingdate" = socatt_c$Observation.date,
+                       "medianame" = socatt_c$Media.file.name, "videolength" = socatt_c$Media.duration..s., "coder" = 
+                         socatt_c$Coder.ID, "subjectID" = socatt_c$Subject, "behavior" = socatt_c$Behavior,
+                       "modifier1" = socatt_c$Modifier..1,  
+                       "starttime" = socatt_c$Start..s., "comment" = socatt_c$Comment.start)
+
+# need to assign correct sequence ID to each line.
+socatt_c$sequenceID <- NA
+# it's easy to match up when there is just one sequence in the video, so flag it and do those first
+vidfreq <- as.data.frame(ftable(soc_att$videoID)) # see how many times each videoID occurs
+# filter just to multiples
+multiples <- as.character(vidfreq$Var1[vidfreq$Freq > 1])
+soc_att$multiple <- ifelse(soc_att$videoID %in% multiples, 1, 0)
+socatt_c$multiple <- ifelse(socatt_c$videoID %in% multiples, 1, 0)
+#dataset with singles only
+socatt_cs <- socatt_c[socatt_c$multiple == 0,]
+
+for(i in 1:nrow(socatt_cs)) {
+    socatt_cs$sequenceID[i] <- soc_att$sequenceID[soc_att$videoID == socatt_cs$videoID[i]]
+}
+
+# now all that's left is to match the remaining lines to a sequenceID
+# I think this will be easiest using the behavior level coding
+# filter to just the NAs
+socatt_cm <- socatt_c[socatt_c$multiple == 1,]
+
+for(i in 1:nrow(socatt_cm)) {
+  # pull for this video the other coded behaviors from the detailed tool use coding
+  thisvideo <- dettools_r2[dettools_r2$videoID == socatt_cm$videoID[i],]
+  # find behavior with closest starttime to each NA row
+  thisvideo$difftimes <- abs(thisvideo$starttime - socatt_cm$starttime[i])
+  # then take the sequenceID of that behavior
+  socatt_cm$sequenceID[i] <- thisvideo$sequenceID[thisvideo$difftime == min(thisvideo$difftimes)]
+}
+
+# CHECK IS THIS WORKED OK OR IF THERE ARE OBVIOUS MISTAKES TO FIX
+# get behavior-level dataframe to same columns as soc_att_c
+# filter out ones we already have sequence ID for 
+socatt_l <- socatt_l[socatt_l$videoID %in% socatt_cm$videoID, names(socatt_l) %in% names(socatt_cm)]
+
+# just attach and then reorder
+socatt_lc <- rbind(socatt_l, socatt_cm[, -12])
+socatt_lc <- socatt_lc[order(socatt_lc$videoID, socatt_lc$starttime),]
+
+#write.csv(socatt_lc, "detailedtools/socialattentioncheck.csv")
+
+# later do more sanity checks
+# for now make one dataframe with all the social attention coding with sequence IDs
+socatt_ct <- rbind(socatt_cm, socatt_cs)
+sum(is.na(socatt_ct$sequenceID)) # no NAs left
+
+# add age sex of named individuals
+socatt_ct <- left_join(socatt_ct, capID, by = c("subjectID" = "ID"))
+socatt_ct$agesex <- ifelse(is.na(socatt_ct$Age) == TRUE, socatt_ct$subjectID, 
+                          paste(socatt_ct$Age, socatt_ct$Sex, ""))
+socatt_ct$agesex <- tolower(gsub(" ", "", socatt_ct$agesex))
+
+# this is a nice overview of all the exact timings of the behaviors etc.
+# could envision adding this into the main coding so it goes in between the tool use behavior
+# for now will extract the important information per sequence to use in analyses
+# make sequence level dataframe
+socatt_seq <- socatt_ct[!duplicated(socatt_ct$sequenceID), !names(socatt_ct) %in% c("subjectID","behavior", 
+                                                                                     "modifier1", "starttime",
+                                                                                     "comment")]
+head(socatt_seq)
+
+# Clean to information we want
+# who is paying social attention?
+socatt_total <- dcast(setDT(socatt_ct[socatt_ct$behavior == "socialattention", c("sequenceID", "subjectID")]), 
+      sequenceID ~ rowid(sequenceID, prefix = "socatt_ID"),
+      value.var = "subjectID")
+
+# how many individuals are paying social attention
+socatt_total$n_socatt <- rowSums(!is.na(socatt_total[,2:4]))
+
+socatt_seq <- left_join(socatt_seq, socatt_total, by = "sequenceID")
+# timing of social attention (during tool use or after, falling within sequence start-end or after)
+# this is a possibility for the future, but I am leaving this out for now
+
+# also have per age sex class how many were paying social attention (to be able to divide social attention by opportunity)
+socatt_as <- as.data.frame(as.matrix(ftable(socatt_ct$sequenceID[which(socatt_ct$behavior == "socialattention")], 
+                                            socatt_ct$agesex[which(socatt_ct$behavior == "socialattention")])))
+colnames(socatt_as) <- c("sa_nAF", "sa_nAM", "sa_nJM", "sa_nJU", "sa_nSM")
+socatt_as$sequenceID <- rownames(socatt_as)
+socatt_as$sa_nJuveniles <- socatt_as$sa_nJM + socatt_as$sa_nJU
+socatt_as$sa_nAdults <- socatt_as$sa_nAF + socatt_as$sa_nAM
+socatt_as$sa_nSubadults <- socatt_as$sa_nSM
+head(socatt_as)
+
+socatt_seq <- left_join(socatt_seq, socatt_as, by = "sequenceID")
+
+# who is displacing
+disp_only <- dcast(setDT(socatt_ct[socatt_ct$behavior == "displace", c("sequenceID", "subjectID")]), 
+                      sequenceID ~ rowid(sequenceID, prefix = "disp_ID"),
+                      value.var = "subjectID")
+disp_only$n_disp <- rowSums(!is.na(disp_only[,2:3]))
+
+socatt_seq <- left_join(socatt_seq, disp_only, by = "sequenceID")
+
+# who is scrounging
+scr_IDs <- dcast(setDT(socatt_ct[socatt_ct$behavior == "scrounge", c("sequenceID", "subjectID")]), 
+                   sequenceID ~ rowid(sequenceID, prefix = "scr_ID"),
+                   value.var = "subjectID")
+scr_IDs$n_scr <- rowSums(!is.na(scr_IDs[,2:5]))
+
+socatt_seq <- left_join(socatt_seq, scr_IDs, by = "sequenceID")
+
+# possibly can also differentiate the scrounging type and add this information
+# differentiate tolerated and afterwards
+socatt_ct$scrounging <- paste(socatt_ct$modifier1, socatt_ct$behavior)
+# scrounging that is neither tolerated nor afterwards is stealing
+socatt_ct$scrounging <- ifelse(socatt_ct$scrounging == "tolerated scrounge", "tol_scrounge",
+                               ifelse(socatt_ct$scrounging == "afterwards scrounge", "aft_scrounge",
+                                      ifelse(socatt_ct$scrounging == "None scrounge", "steal_scrounge", socatt_ct$scrounging)))
+ftable(socatt_ct[socatt_ct$behavior == "scrounge", c("sequenceID", "scrounging")])
+
+# who is present
+presence <- socatt_ct[socatt_ct$behavior == "present",]
+
+present_as <- as.data.frame(as.matrix(ftable(presence$sequenceID, presence$agesex)))
+colnames(present_as) <- c("p_nAF", "p_nAM", "p_nJM", "p_nJU", "p_nSM", "p_nUU")
+present_as$sequenceID <- rownames(present_as)
+present_as$p_total <- rowSums(present_as[,1:6])
+present_as$p_nJuveniles <- present_as$p_nJM + present_as$p_nJU
+present_as$p_nAdults <- present_as$p_nAF + present_as$p_nAM
+present_as$p_nSubadults <- present_as$p_nSM
+head(present_as)
+
+socatt_seq <- left_join(socatt_seq, present_as, by = "sequenceID")
+
+# set all NA's to 0 except for categorical variables
+socatt_seq <- socatt_seq %>%
+  mutate_at(vars("n_socatt", "sa_nAF", "sa_nAM", "sa_nJM", "sa_nJU", "sa_nSM", "sa_total",
+                 "sa_nJuveniles", "sa_nAdults", "sa_nSubadults", "n_disp", "n_scr", "p_nAF",
+                 "p_nAM", "p_nJM", "p_nJU", "p_nSM", "p_nUU", "p_total", "p_nJuveniles",
+                 "p_nAdults", "p_nSubadults"), ~replace_na(.,0))
+
 ### Datasets we are now left with ####
 # detseq #
 # aggregated to one row per sequence, contains all information on efficiency etc
@@ -391,6 +552,27 @@ dettools_r2 <- dettools_r2[,c("videoID", "codingdate", "medianame", "videolength
                               "n_flies", "n_hloss", "n_misstotal", "n_itemreposit", "n_hamreposit", "n_peel",
                               "n_reposit", "Age", "Sex", "split", "age_of", "deployment")]
 #saveRDS(dettools_r2, "detailedtools/RDS/dettools_r2.rds"
+
+# socatt_ct #
+# coding only of sequences with capuchins present
+# not aggregated, every row is a behavior, detailing scrounging, displacement, avoidance and social attention
+# also coding which age/sex classes and individuals are present during the sequence
+head(socatt_ct)
+socatt_ct <- socatt_ct[,c("videoID", "codingdate", "medianame", "videolength", "coder", "subjectID","behavior", 
+                          "modifier1", "starttime", "comment",  "sequenceID", "multiple", "agesex")]
+#saveRDS(socatt_ct, "detailedtools/RDS/socatt_ct.rds")
+
+
+# socatt_seq #
+# aggregated to one row per sequence, summarized information on how many individuals scrounged, paid social attention
+# which age sex classes were present, who displaced, etc
+head(socatt_seq)
+socatt_seq <- socatt_seq[,c("videoID", "codingdate", "medianame", "videolength", "coder","sequenceID", "n_socatt",
+                            "n_disp", "n_scr", "p_total", "socatt_ID1", "socatt_ID2", "socatt_ID3", "sa_nAF",
+                            "sa_nAM", "sa_nJU", "sa_nSM", "sa_nJuveniles","sa_nAdults", "sa_nSubadults", "disp_ID1",
+                            "disp_ID2", "scr_ID1", "scr_ID2", "scr_ID3", "scr_ID4", "p_nAF", "p_nAM", "p_nJM",
+                            "p_nJU", "p_nSM", "p_nUU", "p_nJuveniles","p_nJuveniles", "p_nAdults", "p_nSubadults")]
+#saveRDS(socatt_seq, "detailedtools/RDS/socatt_seq.rds")
 
 # Generate sample of 100 sequences for interrater reliability
 set.seed(22)
