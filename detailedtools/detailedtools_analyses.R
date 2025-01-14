@@ -664,6 +664,22 @@ tocode[0:nrow(tocode),]
 head(socatt_seq)
 head(socatt_ct)
 
+# my first hunch says to use the socatt_ct, filtered just to presence
+# and then somehow add a column that says "social attention"
+# and if the present individual paid social attention there's a 1
+# annoying thing is when we don't have the ID of the one paying attention, e.g., there are 4 juveniles
+# but only 2 pay attention, then we just need to add the 1 to two of the juveniles (can be arbitrary which ones)
+# but this is always within a single sequence, so that will help
+
+# alternatively if this is shit I can go back through all the coding (RIP) and remove the presence if they were paying social attention
+# but that seems dangerous
+
+# want to end up with dataframe that's like
+# sequence ID, tool user ID, tool user age sex, present age sex, social attention 1/0, total_n capuchins (excl tool user, incl observer),
+# item processed, outcome of tool use event, sequence duration, location, n_scrounging (?), n_displacement (?)
+
+# then can at least run model on who is more likely to pay attention to whom etc
+
 ## NOTE
 # if someone was displaced then there was someone else present (the displacer)
 # so check if we had social attention 0 but displacing yes, then need to fix that
