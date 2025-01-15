@@ -15,6 +15,7 @@ library(reshape2)
 library(lubridate)
 library(mgcv)
 library(gratia)
+library(easystats)
 
 ## NOTES ###
 # If we have enough data, ideally exclude sequences that are split across multiple videos (split == TRUE)
@@ -94,13 +95,19 @@ alm_plot + theme_bw()
 # definitely include whether it was split yes/no as a random effect/fixed effect 
 
 nrow(detseq_o)
-# so at the moment have 2184 sequences
+# so at the moment have 3204 sequences
 # filter to the best of the best (where individuals are known), of course should still check as many unidentified ones as possible
+ftable(detseq_o$subjectID)
+# we have total of 59 ones with not ID, those I think I can fix (probably)
 # also exclude splits
 detseq_oi <- detseq_o[!detseq_o$subjectID %in% c("adultmale", "subadultmale", "juvenileunknown") & detseq_o$split == FALSE,]
 # exclude ones were we missed all pounds (so n_pounds = NA)
 detseq_oi <- detseq_oi[!is.na(detseq_oi$n_pounds) == TRUE,]
-# then end up with 2839 sequences
+nrow(detseq_oi)
+# then end up with 2879 sequences
+
+# make age a factor in the right order (for plotting)
+detseq_oi$Age <- factor(detseq_oi$Age, levels = c("Juvenile", "Subadult", "Adult"))
 
 #### 1. Sequence duration #####
 
@@ -117,7 +124,9 @@ plot(testdist1.2)
 # Gamma appears best (for now)
 
 ## Model 1: Duration depending on age, including item, anviltype, and individual ID as random effect
-m_e1 <- brm(seqduration ~ Age + item*anviltype + (1|subjectID), data = detseq_oi, iter = 1000, chain = 2, core = 2, backend = "cmdstanr", family = "gamma")
+m_e1 <- brm(seqduration ~ Age + item*anviltype + (1|subjectID), data = detseq_oi, iter = 2000, 
+            save_pars = save_pars(all = TRUE), chain = 2, core = 2, backend = "cmdstanr", control = list(adapt_delta = 0.99),
+            family = "gamma")
 # saving model if you dont want to have to run it again
 #saveRDS(m_e1, "detailedtools/RDS/m_e1.rds")
 #m_e1 <- readRDS("detailedtools/RDS/m_e1.rds")
@@ -128,6 +137,17 @@ mcmc_plot(m_e1)
 pp_check(m_e1)
 plot(conditional_effects(m_e1))
 
+loo(m_e1) # 1 bad case with pareto k value >0.7
+loo_R2(m_e1) # 0.22
+round(bayes_R2(m_e1),2) # 0.23
+
+round(exp(3.34),2)
+
+hypothesis(m_e1, "Intercept  > Intercept + AgeSubadult", alpha = 0.05)
+hypothesis(m_e1, "Intercept  > Intercept + AgeAdult", alpha = 0.05)
+hypothesis(m_e1, "Intercept + AgeAdult  < Intercept + AgeSubadult", alpha = 0.05)
+
+
 # visualize
 # make violin plot
 m_type_pred <- m_e1 %>% 
@@ -137,8 +157,9 @@ m_type_pred <- m_e1 %>%
                                subjectID = detseq_oi$subjectID))
 
 # age difference in duration to open item
-ggplot(data = m_type_pred, aes(x = Age, y = .epred)) + geom_violin(aes(color = Age, fill = Age), alpha = 0.4) + ylim(0,50) +
-  stat_summary(detseq_o, inherit.aes = FALSE, mapping=aes(x = Age, y = seqduration, color = Age), geom = "point", fun = "mean",
+#png("detailedtools/RDS/m_e1_seqduration.png", width = 8, height = 7, units = 'in', res = 300)
+ggplot(data = m_type_pred, aes(x = Age, y = .epred)) + geom_violin(aes(color = Age, fill = Age), alpha = 0.4)  +
+  stat_summary(detseq_oi, inherit.aes = FALSE, mapping=aes(x = Age, y = seqduration, color = Age), geom = "point", fun = "mean",
                size = 4) +
   scale_fill_viridis_d(option = "plasma", end = 0.8) +
   scale_color_viridis_d(option = "plasma", end = 0.8) +
@@ -146,10 +167,11 @@ ggplot(data = m_type_pred, aes(x = Age, y = .epred)) + geom_violin(aes(color = A
   labs(x = "Age", y = "Seconds required to open item") +
   theme_bw() + theme(axis.text = element_text(size = 12),
                      axis.title = element_text(size = 14))
+#dev.off()
 
 # item difference in duration to open item
 ggplot(data = m_type_pred, aes(x = item, y = .epred)) + geom_violin(aes(color = item, fill = item), alpha = 0.4) + ylim(0,100) +
-  stat_summary(detseq_o, inherit.aes = FALSE, mapping=aes(x = item, y = seqduration, color = item), geom = "point", fun = "mean",
+  stat_summary(detseq_oi, inherit.aes = FALSE, mapping=aes(x = item, y = seqduration, color = item), geom = "point", fun = "mean",
                size = 4) +
   scale_fill_viridis_d(option = "plasma", end = 0.8) +
   scale_color_viridis_d(option = "plasma", end = 0.8) +
@@ -165,7 +187,8 @@ testdist2.1 <- fitdist(detseq_oi$n_pounds, "pois")
 plot(testdist2.1)
 
 # Model 2: Number of pounds depending on age, including item, anviltype, and individual ID as random effect
-m_e2 <- brm(n_pounds ~ Age + item*anviltype + (1|subjectID), data = detseq_oi, family = "poisson", iter = 1000, chain = 2, core = 2, backend = "cmdstanr")
+m_e2 <- brm(n_pounds ~ Age + item*anviltype + (1|subjectID), data = detseq_oi, family = "poisson", iter = 2000, 
+            chain = 3, core = 3, save_pars = save_pars(all = TRUE), control = list(adapt_delta = 0.99), backend = "cmdstanr")
 # save and load model
 # saveRDS(m_e2, "detailedtools/RDS/m_e2.rds")
 # m_e2 <- readRDS("detailedtools/RDS/m_e2.rds")
@@ -176,9 +199,13 @@ pp_check(m_e2)
 mcmc_plot(m_e2)
 plot(conditional_effects(m_e2))
 
+loo(m_e2) # all cases good
+loo_R2(m_e2) # 0.11
+round(bayes_R2(m_e2),2) # 0.12
+
 # to test hypotheses
 hypothesis(m_e2, "Intercept  > Intercept + anviltypewood", alpha = 0.05)
-hypothesis(m_e2, "Intercept  < Intercept + AgeJuvenile", alpha = 0.05)
+hypothesis(m_e2, "Intercept  > Intercept + AgeSubadult", alpha = 0.05)
 
 # visualizing
 # make violin plot
@@ -189,8 +216,9 @@ m_type_pred2 <- m_e2 %>%
                                subjectID = detseq_oi$subjectID))
 
 # age difference in number of pounds to open item
+#png("detailedtools/RDS/m_e1_pound.png", width = 8, height = 7, units = 'in', res = 300)
 ggplot(data = m_type_pred2, aes(x = Age, y = .epred)) + geom_violin(aes(color = Age, fill = Age), alpha = 0.4) +
-  stat_summary(detseq_o, inherit.aes = FALSE, mapping=aes(x = Age, y = n_pounds, color = Age), geom = "point", fun = "mean",
+  stat_summary(detseq_oi, inherit.aes = FALSE, mapping=aes(x = Age, y = n_pounds, color = Age), geom = "point", fun = "mean",
                size = 4) +
   scale_fill_viridis_d(option = "plasma", end = 0.8) +
   scale_color_viridis_d(option = "plasma", end = 0.8) +
@@ -198,10 +226,11 @@ ggplot(data = m_type_pred2, aes(x = Age, y = .epred)) + geom_violin(aes(color = 
   labs(x = "Age", y = "Number of pounds required to open item") +
   theme_bw() + theme(axis.text = element_text(size = 12),
                      axis.title = element_text(size = 14))
+#dev.off()
 
 # item difference in number of pounds to open item
 ggplot(data = m_type_pred2, aes(x = item, y = .epred)) + geom_violin(aes(color = item, fill = item), alpha = 0.4) +
-  stat_summary(detseq_o[which(detseq_o$item %in% c("almendrabrown", "almendragreen")),], inherit.aes = FALSE, mapping=aes(x = item, y = n_pounds, color = item), geom = "point", fun = "mean",
+  stat_summary(detseq_oi[which(detseq_oi$item %in% c("almendrabrown", "almendragreen")),], inherit.aes = FALSE, mapping=aes(x = item, y = n_pounds, color = item), geom = "point", fun = "mean",
                size = 4) +
   scale_fill_viridis_d(option = "plasma", end = 0.8) +
   scale_color_viridis_d(option = "plasma", end = 0.8) +
@@ -220,7 +249,8 @@ ggplot(detseq_oi, aes(y = seqduration, x = n_pounds, color = Age, shape = Age)) 
 
 
 # Model 2a: Number of pounds depending on age, including item, anviltype, and individual ID as random effect, and sequence duration as offset
-m_e2a <- brm(n_pounds ~ Age + item*anviltype + (1|subjectID) + offset(log(seqduration)), data = detseq_oi, family = "poisson", iter = 1000, chain = 2, core = 2, backend = "cmdstanr")
+m_e2a <- brm(n_pounds ~ Age + item*anviltype + (1|subjectID) + offset(log(seqduration)), data = detseq_oi, family = "poisson", 
+             iter = 2000, chain = 3, core = 3, save_pars = save_pars(all = TRUE), control = list(adapt_delta = 0.99), backend = "cmdstanr")
 # save and load model
 # saveRDS(m_e2a, "detailedtools/RDS/m_e2a.rds")
 # m_e2a <- readRDS("detailedtools/RDS/m_e2a.rds")
@@ -230,6 +260,10 @@ summary(m_e2a)
 pp_check(m_e2a)
 mcmc_plot(m_e2a)
 plot(conditional_effects(m_e2a))
+
+loo(m_e2a) # all cases good
+loo_R2(m_e2a) # 0.38
+round(bayes_R2(m_e2a),2) # 0.69
 
 # to test hypotheses
 hypothesis(m_e2a, "Intercept  > Intercept + anviltypewood", alpha = 0.05)
@@ -246,7 +280,7 @@ m_type_pred2 <- m_e2a %>%
 
 # age difference in number of pounds to open item
 ggplot(data = m_type_pred2, aes(x = Age, y = .epred)) + geom_violin(aes(color = Age, fill = Age), alpha = 0.4) +
-  stat_summary(detseq_o, inherit.aes = FALSE, mapping=aes(x = Age, y = n_pounds, color = Age), geom = "point", fun = "mean",
+  stat_summary(detseq_oi, inherit.aes = FALSE, mapping=aes(x = Age, y = n_pounds, color = Age), geom = "point", fun = "mean",
                size = 4) +
   scale_fill_viridis_d(option = "plasma", end = 0.8) +
   scale_color_viridis_d(option = "plasma", end = 0.8) +
@@ -269,7 +303,8 @@ plot(testdist3.1)
 
 # Model 3a: Number of misstrikes (true misses) depending on age, item, anviltype and subjectID as random effect
 ## ZERO-INFLATED POISSON
-m_e3a <- brm(n_miss ~ Age + item*anviltype + (1|subjectID), data = detseq_o, family = zero_inflated_poisson, iter = 1000, chain = 2, core = 2, backend = "cmdstanr", control = list(adapt_delta = 0.99))
+m_e3a <- brm(n_miss ~ Age + item*anviltype + (1|subjectID), data = detseq_o, family = zero_inflated_poisson, 
+             iter = 1000, chain = 2, core = 2, save_pars = save_pars(all = TRUE), backend = "cmdstanr", control = list(adapt_delta = 0.99))
 # saving and loading model
 # saveRDS(m_e3a, "detailedtools/RDS/m_e3a.rds")
 # m_e3a <- readRDS("detailedtools/RDS/m_e3a.rds")
@@ -289,7 +324,7 @@ m_type_pred3 <- m_e3a %>%
 
 # age difference in misstrikes
 ggplot(data = m_type_pred3, aes(x = Age, y = .epred)) + geom_boxplot(aes(color = Age, fill = Age), alpha = 0.4) +
-  stat_summary(detseq_o, inherit.aes = FALSE, mapping=aes(x = Age, y = n_miss, color = Age), geom = "point", fun = "mean",
+  stat_summary(detseq_oi, inherit.aes = FALSE, mapping=aes(x = Age, y = n_miss, color = Age), geom = "point", fun = "mean",
                size = 4) +
   scale_fill_viridis_d(option = "plasma", end = 0.8) +
   scale_color_viridis_d(option = "plasma", end = 0.8) +
@@ -302,7 +337,10 @@ ggplot(data = m_type_pred3, aes(x = Age, y = .epred)) + geom_boxplot(aes(color =
 
 # Model 3b: Number of item flies depending on age, item, anviltype and subjectID as random effect
 ## ZERO-INFLATED POISSON
-m_e3b <- brm(n_flies ~ Age + item*anviltype + (1|subjectID), data = detseq_o, family = zero_inflated_poisson, iter = 1000, chain = 2, core = 2, backend = "cmdstanr", control = list(adapt_delta = 0.99))
+m_e3b <- brm(n_flies ~ Age + item*anviltype + (1|subjectID), data = detseq_o, 
+             family = zero_inflated_poisson, iter = 1000, chain = 2, core = 2, 
+             save_pars = save_pars(all = TRUE),
+             backend = "cmdstanr", control = list(adapt_delta = 0.99))
 # saving and loading model
 # saveRDS(m_e3b, "detailedtools/RDS/m_e3b.rds")
 # m_e3b <- readRDS("detailedtools/RDS/m_e3b.rds")
@@ -322,7 +360,7 @@ m_type_pred3b <- m_e3b %>%
 
 # age difference in items flying
 ggplot(data = m_type_pred3b, aes(x = Age, y = .epred)) + geom_boxplot(aes(color = Age, fill = Age), alpha = 0.4) +
-  stat_summary(detseq_o, inherit.aes = FALSE, mapping=aes(x = Age, y = n_flies, color = Age), geom = "point", fun = "mean",
+  stat_summary(detseq_oi, inherit.aes = FALSE, mapping=aes(x = Age, y = n_flies, color = Age), geom = "point", fun = "mean",
                size = 4) +
   scale_fill_viridis_d(option = "plasma", end = 0.8) +
   scale_color_viridis_d(option = "plasma", end = 0.8) +
@@ -335,7 +373,9 @@ ggplot(data = m_type_pred3b, aes(x = Age, y = .epred)) + geom_boxplot(aes(color 
 
 # Model 3c: Number of hammer losses depending on age, item, anviltype and subjectID as random effect
 ## ZERO-INFLATED POISSON
-m_e3c <- brm(n_hloss ~ Age + item*anviltype + (1|subjectID), data = detseq_o, family = zero_inflated_poisson, iter = 1000, chain = 2, core = 2, backend = "cmdstanr", control = list(adapt_delta = 0.99))
+m_e3c <- brm(n_hloss ~ Age + item*anviltype + (1|subjectID), data = detseq_o, 
+             family = zero_inflated_poisson, iter = 1000, chain = 2, core = 2, 
+             save_pars = save_pars(all = TRUE), backend = "cmdstanr", control = list(adapt_delta = 0.99))
 # saving and loading model
 # saveRDS(m_e3c, "detailedtools/RDS/m_e3c.rds")
 # m_e3c <- readRDS("detailedtools/RDS/m_e3c.rds")
@@ -355,7 +395,7 @@ m_type_pred3c <- m_e3c %>%
 
 # age difference in hammer losses
 ggplot(data = m_type_pred3c, aes(x = Age, y = .epred)) + geom_boxplot(aes(color = Age, fill = Age), alpha = 0.4) +
-  stat_summary(detseq_o, inherit.aes = FALSE, mapping=aes(x = Age, y = n_hloss, color = Age), geom = "point", fun = "mean",
+  stat_summary(detseq_oi, inherit.aes = FALSE, mapping=aes(x = Age, y = n_hloss, color = Age), geom = "point", fun = "mean",
                size = 4) +
   scale_fill_viridis_d(option = "plasma", end = 0.8) +
   scale_color_viridis_d(option = "plasma", end = 0.8) +
@@ -411,7 +451,8 @@ ggplot(detseq_o2, aes(x=subjectID, y=n_miss, color = Age, fill = Age)) +
 
 ## 4a: repositions of item
 # Model 4a: Number of repositions depending on age, item, anviltype and subject ID as random effect
-m_e4a <- brm(n_itemreposit ~ Age + item*anviltype + (1|subjectID), data = detseq_oi, family = "poisson", iter = 1000, chain = 2, core = 2, backend = "cmdstanr")
+m_e4a <- brm(n_itemreposit ~ Age + item*anviltype + (1|subjectID), data = detseq_oi, family = "poisson", 
+             iter = 1000, chain = 2, core = 2, save_pars = save_pars(all = TRUE), backend = "cmdstanr")
 # saving and loading model
 # saveRDS(m_e4a, "detailedtools/RDS/m_e4a.rds")
 # m_e4a <- readRDS("detailedtools/RDS/m_e4a.rds")
@@ -462,7 +503,7 @@ m_type_pred4b <- m_e4b %>%
 
 # age difference in number of hammer repositions
 ggplot(data = m_type_pred4b, aes(x = Age, y = .epred)) + geom_violin(aes(color = Age, fill = Age), alpha = 0.4) +
-  stat_summary(detseq_o, inherit.aes = FALSE, mapping=aes(x = Age, y = n_hamreposit, color = Age), geom = "point", fun = "mean",
+  stat_summary(detseq_oi, inherit.aes = FALSE, mapping=aes(x = Age, y = n_hamreposit, color = Age), geom = "point", fun = "mean",
                size = 4) +
   scale_fill_viridis_d(option = "plasma", end = 0.8) +
   scale_color_viridis_d(option = "plasma", end = 0.8) +
@@ -473,7 +514,8 @@ ggplot(data = m_type_pred4b, aes(x = Age, y = .epred)) + geom_violin(aes(color =
 
 ## 4c: peeling
 # Model 4c: Number of peels depending on age, item, anviltype and subject ID as random effect
-m_e4c <- brm(n_peel ~ Age + item*anviltype + (1|subjectID), data = detseq_oi, family = "poisson", iter = 1000, chain = 2, core = 2, backend = "cmdstanr")
+m_e4c <- brm(n_peel ~ Age + item*anviltype + (1|subjectID), data = detseq_oi,
+             save_pars = save_pars(all = TRUE), family = "poisson", iter = 1000, chain = 2, core = 2, backend = "cmdstanr")
 # saving and loading model
 # saveRDS(m_e4c, "detailedtools/RDS/m_e4c.rds")
 # m_e4c <- readRDS("detailedtools/RDS/m_e4c.rds")
@@ -515,8 +557,8 @@ ggplot(detseq_o2, aes(x=subjectID, y=n_reposit, color = Age, fill = Age)) +
 
 ### Exploring individual variation and development ####
 
-# focus only on identifiable individuals and data from R11 (which is complete)
-detseq_o2c <- detseq_o2[detseq_o2$deployment == "R11",]
+# focus only on identifiable individuals who had more than 10 observations (so no Joe and Ink)
+detseq_o2c <- detseq_o2
 ftable(detseq_o2c$item)
 ftable(detseq_o2c$subjectID)
 # make subjectID factor that is ordered based on age
@@ -575,20 +617,20 @@ ggplot(melt_detseq) + geom_violin(aes(y = value, x = variable, color = variable,
 
 # would probably have to be some kind of GAM, that also includes other things that affects these things (item, anviltype)
 # either work with actual number or do maybe a julian day or something? and then split by ID? 
-detseq_o2$time <- as.numeric(difftime(detseq_o2$mediadate, min(detseq_o2$mediadate), unit = "days"))
+detseq_o2c$time <- as.numeric(difftime(detseq_o2c$mediadate, min(detseq_o2c$mediadate), unit = "days"))
 head(detseq_o2c$time)
-detseq_o2$subjectID_F <- as.factor(detseq_o2$subjectID)
-detseq_o2$Age_f <- as.factor(detseq_o2$Age)
+detseq_o2c$subjectID_F <- as.factor(detseq_o2c$subjectID)
+detseq_o2c$Age_f <- as.factor(detseq_o2c$Age)
 
 str(detseq_o2c)
-dev_gam1 <- gam(n_pounds ~ s(time, by = Age_f) + Age_f + s(subjectID_F, bs = "re"), data = detseq_o2[detseq_o2$item == "almendrabrown",], family = "poisson", method = "REML")
+dev_gam1 <- gam(n_pounds ~ s(time, by = Age_f) + Age_f + s(subjectID_F, bs = "re"), data = detseq_o2c[detseq_o2c$item == "almendrabrown",], family = "poisson", method = "REML")
 summary(dev_gam1)
 draw(dev_gam1)
 plot(dev_gam1)
 
 # in brms (trial)
-dev_gam1b <- brm(n_pounds ~ s(time, by = Age_f) + Age_f + s(subjectID_F, bs = "re"), data=detseq_o2[detseq_o2$item == "almendrabrown",], family="poisson", 
-               chains=2, cores = 4, backend = "cmdstanr", save_pars = save_pars(all = TRUE),
+dev_gam1b <- brm(n_pounds ~ s(time, by = Age_f) + Age_f + s(subjectID_F, bs = "re"), data=detseq_o2c[detseq_o2c$item == "almendrabrown",], family="poisson", 
+               chains=2, cores = 2, backend = "cmdstanr", save_pars = save_pars(all = TRUE),
                iter = 1000)
 # saving and loading model
 # saveRDS(dev_gam1b, "detailedtools/RDS/dev_gam1b.rds")
@@ -596,6 +638,14 @@ dev_gam1b <- brm(n_pounds ~ s(time, by = Age_f) + Age_f + s(subjectID_F, bs = "r
 plot(conditional_smooths(dev_gam1b))
 plot(conditional_effects(dev_gam1b))
 
+dev_gam2b <- brm(n_pounds ~ s(time, by = subjectID_F) + subjectID_F + Age_f, data=detseq_o2c[detseq_o2c$item == "almendrabrown",], family="poisson", 
+                 chains=2, cores = 2, backend = "cmdstanr", save_pars = save_pars(all = TRUE),
+                 iter = 1000)
+# saving and loading model
+# saveRDS(dev_gam2b, "detailedtools/RDS/dev_gam2b.rds")
+# dev_gam2b <- readRDS("detailedtools/RDS/dev_gam2b.rds")
+plot(conditional_smooths(dev_gam2b))
+plot(conditional_effects(dev_gam1b))
 
 ### What is ABE doing? ###
 # do we see ABE use tools at all in this dataset?

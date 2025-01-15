@@ -21,6 +21,7 @@ library(data.table)
 dettools1 <- read.csv("detailedtools/ZGdetailedtoolscoding.csv")
 # Meredith's csv
 dettools2 <- read.csv("detailedtools/EXP-ANV-01-R11_MC.csv")
+dettools2$Coder.ID <- "MC"
 # Leonie's csv
 dettools3 <- read.csv("detailedtools/CEBUS-02-R11_R12_2022_EXP-ANV-01_R12_LRdetailedtoolscoding.csv")
 
@@ -525,7 +526,7 @@ socatt_seq <- left_join(socatt_seq, present_as, by = "sequenceID")
 
 # set all NA's to 0 except for categorical variables
 socatt_seq <- socatt_seq %>%
-  mutate_at(vars("n_socatt", "sa_nAF", "sa_nAM", "sa_nJM", "sa_nJU", "sa_nSM", "sa_total",
+  mutate_at(vars("n_socatt", "sa_nAF", "sa_nAM", "sa_nJM", "sa_nJU", "sa_nSM", 
                  "sa_nJuveniles", "sa_nAdults", "sa_nSubadults", "n_disp", "n_scr", "p_nAF",
                  "p_nAM", "p_nJM", "p_nJU", "p_nSM", "p_nUU", "p_total", "p_nJuveniles",
                  "p_nAdults", "p_nSubadults"), ~replace_na(.,0))
