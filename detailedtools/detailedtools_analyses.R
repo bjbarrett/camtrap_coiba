@@ -1,7 +1,7 @@
 ## Detailed tool use analyses -- Analyses
 ## MPI-AB; Z Goldsborough
 
-## Analysing efficiency, technique and selectivity in tool use
+## Analysing efficiency of tool use and social attention paid to tool use
 
 ## packages needed
 library(stringr)
@@ -18,21 +18,29 @@ library(gratia)
 library(easystats)
 
 ## NOTES ###
-# If we have enough data, ideally exclude sequences that are split across multiple videos (split == TRUE)
+# If we have enough data, ideally exclude sequences that are split across multiple videos (split == TRUE) and of which outcome is unknown
 # Similarly, if we have enough data with identified individuals, only work on that dataset so individual can be a random effect
 
 ### Load datasets, cleaned in detailedtools.R script ####
 #detseq <- readRDS("detailedtools/RDS/detseq.rds")
+head(detseq)
+# every row is a tool use sequence, all the information is aggregated to the level of a single sequence
 #dettools_r2 <- readRDS("detailedtools/RDS/dettools_r2.rds")
+head(dettools_r2)
+# every row is a behavior, so this still contains every coded behavior with timestamp, no aggregation
 
-# for most analyses, will only look at sequences that were successful (so outcome = opened)
-# also filter the items to only the most abundant ones (for now)
+### EFFICIENCY ####
+
+#### Filter and general diagnostics ####
+# only include tool use sequences that were successful (so outcome = opened) to be able to measure efficiency
+# consider variability in the items processed
 ftable(detseq$item)
+# see that anything other than almendra (sea almond) is very rare
+# also likely need different techniques and nr of pounds for different items
+# so subset to almendra's only (all levels of ripeness)
 detseq_o <- detseq[detseq$outcome == "opened" & detseq$item %in% c("almendrabrown", "almendragreen", "almendraunknown", "almendrared"),]
 
-### Diagnostics #### 
-
-# first let's examine some general things, and see whether we have good inter-rater agreement and how much data we have
+# comparing different coders
 ggplot(detseq_o, aes(x=coder, y=n_pounds)) + 
   geom_violin()
 
@@ -127,8 +135,9 @@ plot(testdist1.2)
 m_e1 <- brm(seqduration ~ Age + item*anviltype + (1|subjectID), data = detseq_oi, iter = 2000, 
             save_pars = save_pars(all = TRUE), chain = 2, core = 2, backend = "cmdstanr", control = list(adapt_delta = 0.99),
             family = "gamma")
+# m_e1 <- add_criterion(m_e1, c("loo", "loo_R2", "bayes_R2"), reloo = TRUE, backend = "cmdstanr", ndraws = 2000) 
 # saving model if you dont want to have to run it again
-#saveRDS(m_e1, "detailedtools/RDS/m_e1.rds")
+# saveRDS(m_e1, "detailedtools/RDS/m_e1.rds")
 #m_e1 <- readRDS("detailedtools/RDS/m_e1.rds")
 
 # diagnostics
@@ -137,16 +146,19 @@ mcmc_plot(m_e1)
 pp_check(m_e1)
 plot(conditional_effects(m_e1))
 
-loo(m_e1) # 1 bad case with pareto k value >0.7
+loo(m_e1) # had one influential case (which is observation 265, Ink who is adult but bad)
 loo_R2(m_e1) # 0.22
 round(bayes_R2(m_e1),2) # 0.23
 
-round(exp(3.34),2)
+plot(m_e1$criteria$loo, label_points = TRUE)
+
+round(exp(2.99),2)
 
 hypothesis(m_e1, "Intercept  > Intercept + AgeSubadult", alpha = 0.05)
 hypothesis(m_e1, "Intercept  > Intercept + AgeAdult", alpha = 0.05)
 hypothesis(m_e1, "Intercept + AgeAdult  < Intercept + AgeSubadult", alpha = 0.05)
 
+#report(m_e1, include_effectsize = FALSE)
 
 # visualize
 # make violin plot
@@ -203,9 +215,12 @@ loo(m_e2) # all cases good
 loo_R2(m_e2) # 0.11
 round(bayes_R2(m_e2),2) # 0.12
 
+round(exp(1.66),2)
+
+
 # to test hypotheses
-hypothesis(m_e2, "Intercept  > Intercept + anviltypewood", alpha = 0.05)
-hypothesis(m_e2, "Intercept  > Intercept + AgeSubadult", alpha = 0.05)
+hypothesis(m_e1, "Intercept  < Intercept + itemalmendragreen", alpha = 0.05)
+hypothesis(m_e2, "Intercept > Intercept + AgeAdult", alpha = 0.05)
 
 # visualizing
 # make violin plot
@@ -278,7 +293,7 @@ m_type_pred2 <- m_e2a %>%
                                subjectID = detseq_oi$subjectID,
                                seqduration = detseq_oi$seqduration))
 
-# age difference in number of pounds to open item
+# age difference in number of pounds to open item (offset duration)
 ggplot(data = m_type_pred2, aes(x = Age, y = .epred)) + geom_violin(aes(color = Age, fill = Age), alpha = 0.4) +
   stat_summary(detseq_oi, inherit.aes = FALSE, mapping=aes(x = Age, y = n_pounds, color = Age), geom = "point", fun = "mean",
                size = 4) +
@@ -678,28 +693,7 @@ ftable(displacements[!duplicated(displacements$sequenceID),]$scrounging)
 ftable(detseq$scrounging)
 
 ### Social Attention ####
-# what is outcome when individuals are paying social attention
-ftable(soc_att$outcome[soc_att$socatt == "socialattention"])
-
-# maybe filter out other items than almendras? (because others are so rare) 
-# or pool together
-soc_att$item2 <- ifelse(str_detect(soc_att$item, "almendra") == FALSE, "other", soc_att$item)
-soc_att$attention <- ifelse(soc_att$socatt == "socialattention", 1, 0)
-
-table(soc_att$socatt, soc_att$displacement)
-
-#who is the tool user in these cases
-ggplot(data = soc_att[!is.na(soc_att$age_of),], aes(x = age_of, fill = attention)) + geom_histogram(stat = "count")
-# what are they processing
-ggplot(data = soc_att[str_detect(soc_att$item, "almendra") == TRUE,], aes(x = item, fill = attention)) + geom_histogram(stat = "count")
-str(soc_att)
-# more likely to pay attention with more efficient ones?
-ggplot(data = soc_att, aes(x = n_pounds, fill = attention)) + geom_histogram(stat = "count")
-str(soc_att)
-ggplot(data = soc_att, aes(x = n_misstotal, fill = attention)) + geom_histogram(stat = "count")
-soc_att$age_f <- factor(soc_att$Age, levels = c("Juvenile", "Subadult", "Adult"))
-soc_att$hour <- hour(soc_att$videostart)
-
+## for coding
 # ones I coded
 socatt_vidnames <- soc_att[,c("videoID", "coder", "subjectID", "attention", "scrounging", "displacement")]
 # filter to ones not coded yet
@@ -708,61 +702,184 @@ socatt_c <- read.csv("detailedtools/socialattentioncoding.csv")
 tocode <- socatt_vidnames[!socatt_vidnames$videoID %in% socatt_c$Observation.id,]
 tocode[0:nrow(tocode),]
 
-
-
 ## first look at the detailed social attention coding
 head(socatt_seq)
 head(socatt_ct)
 
 # my first hunch says to use the socatt_ct, filtered just to presence
-# and then somehow add a column that says "social attention"
-# and if the present individual paid social attention there's a 1
-# annoying thing is when we don't have the ID of the one paying attention, e.g., there are 4 juveniles
-# but only 2 pay attention, then we just need to add the 1 to two of the juveniles (can be arbitrary which ones)
-# but this is always within a single sequence, so that will help
+head(socatt_ct)
+# add variable whether there is social attention in the sequence
+socsequences <- unique(socatt_ct$sequenceID[which(socatt_ct$behavior == "socialattention")])
+socatt_ct$socatt <- ifelse(socatt_ct$sequenceID %in% socsequences, 1, 0)
+socatt_cts <- socatt_ct[socatt_ct$behavior == "socialattention",]
 
-# alternatively if this is shit I can go back through all the coding (RIP) and remove the presence if they were paying social attention
-# but that seems dangerous
+#make dataframe with already all presence without social attention
+socatt_final <- socatt_ct[socatt_ct$behavior == "present" & socatt_ct$socatt == 0,]
+
+# work on the sequence level
+for(i in 1:length(socsequences)){
+  observers <- socatt_cts$subjectID[which(socatt_cts$sequenceID == socsequences[i])]
+  seq_present <- socatt_ct[socatt_ct$sequenceID == socsequences[i] & socatt_ct$behavior == "present",]
+  # set all socatt to 0 except for the individual paying social attention 
+  seq_present$socatt <- 0
+  #easiest to match for each observer
+  # for first observer, just take first line with matching presence 
+  # (e.g. if there are multiple juveniles just take the first, and make it a 1)
+  seq_present$socatt[which(seq_present$subjectID == observers[1])][1] <- 1
+  if(length(observers) > 1) {
+    # to avoid making the same one 1 again, subset to those still 0
+    seq_present$socatt[which(seq_present$subjectID == observers[2] & seq_present$socatt == 0)][1] <- 1
+  }
+  if(length(observers) > 2) {
+    seq_present$socatt[which(seq_present$subjectID == observers[3] & seq_present$socatt == 0)][1] <- 1
+  }
+socatt_final <- rbind(socatt_final, seq_present)
+}
+
+socatt_final <- socatt_final[order(socatt_final$sequenceID),]
+# in this sample, we have:
+length(unique(socatt_final$sequenceID))
+# 990 sequences with capuchins present
+# now attach the relevant information from the main dataframe (information on the tool user etc)
+head(detseq)
+
+socatt_final <- left_join(socatt_final, detseq[,c("sequenceID", "subjectID", "coder", "location", "item",
+                                                    "outcome", "displacement", "scrounging",
+                                                   "anviltype", "seqduration", "n_pounds", "n_misstotal",
+                                                   "Age", "deployment", "split", "hammerswitches", "anvilswitches")],
+                          by = "sequenceID")
+
+# also add more detailed information on number of capuchins present, number scrounging etc, from the social coding
+head(socatt_seq)
+socatt_final <- left_join(socatt_final, socatt_seq[,c("sequenceID", "n_socatt", "n_disp", "n_scr", "p_total")],
+                          by = "sequenceID")
+
+# clean up the final dataframe
+head(socatt_final)
+# subjectID.x = observer, coder.x = coder of social attention
+socatt_final$observerID <- socatt_final$subjectID.x
+socatt_final$tooluserID <- socatt_final$subjectID.y
+socatt_final$coder_socatt <- socatt_final$coder.x
+socatt_final$coder_tooluse <- socatt_final$coder.y
+socatt_final$observer_agesex <- ifelse(str_detect(socatt_final$agesex, "juvenile"), "juvenile", socatt_final$agesex)
+socatt_final$tooluser_age <- socatt_final$Age
+# variable for if there is social attention in sequence
+socatt_final$socialattention <- ifelse(socatt_final$sequenceID %in% socsequences, "socialattention", "nosocialattention")
+
+socatt_final <- socatt_final[,c("sequenceID", "videoID", "deployment", "location", "anviltype", "seqduration", "coder_socatt", 
+                                "coder_tooluse", "split", "item", "observerID", "observer_agesex", "socatt","tooluserID", "tooluser_age",
+                                 "n_pounds", "n_misstotal", "hammerswitches", "anvilswitches", "n_socatt", "n_disp", "n_scr", "p_total",
+                                "outcome", "displacement", "scrounging", "socialattention")]
+
+# some descriptives
+# how many of these sequences are split across various videos (so information missing)
+ftable(socatt_final$split[!duplicated(socatt_final$sequenceID)])
+table(socatt_final$socialattention[!duplicated(socatt_final$sequenceID)], 
+      socatt_final$split[!duplicated(socatt_final$sequenceID)])
+# how many sequences have unknown observers
+unique(socatt_final$videoID[which(socatt_final$observer_agesex == "unknown")])
+# what are outcomes depending on social attention yes/no
+table(socatt_final$socialattention[!duplicated(socatt_final$sequenceID)], 
+      socatt_final$outcome[!duplicated(socatt_final$sequenceID)])
+# unknown means that we do not know the ending because it is not on camera 
+# none could be unknown or another reason
+# either way, good to exclude these because we missed part of the sequence and 
+# therefore are not sure who was present/who paid attention
+
+# exclude these sequences
+socatt_final <- socatt_final[socatt_final$split == FALSE & !socatt_final$observer_agesex == "unknown" &
+                               !socatt_final$outcome == "None" & !socatt_final$outcome == "Unknown",]
+# then have 837 sequences
+length(unique(socatt_final$sequenceID))
+
+# in how many sequences do we see social attention?
+ftable(socatt_final$socialattention[!duplicated(socatt_final$sequenceID)])
+
+# what items are being processed
+ftable(socatt_final$item[!duplicated(socatt_final$sequenceID)])
+# maybe pool together items than almendras? (because others are so rare) 
+# or pool together
+socatt_final$item2 <- ifelse(str_detect(socatt_final$item, "almendra") == FALSE, "other", socatt_final$item)
+ftable(socatt_final$item2[!duplicated(socatt_final$sequenceID)])
+
+ftable(socatt_final$tooluserID)
+ftable(socatt_final$observerID)
+
+# check for NAs
+which(is.na(socatt_final), arr.ind = TRUE)
+
+# so we usually have the ID of the tool user, not always of the observer
+# could envision doing a model with ID in subsetted to a more thorough dataset
+# but I think this will be more for descriptives and for the model we do more general on age
+# probably need random effect of sequenceID?
+
 
 # want to end up with dataframe that's like
 # sequence ID, tool user ID, tool user age sex, present age sex, social attention 1/0, total_n capuchins (excl tool user, incl observer),
 # item processed, outcome of tool use event, sequence duration, location, n_scrounging (?), n_displacement (?)
 
-# then can at least run model on who is more likely to pay attention to whom etc
-
-## NOTE
-# if someone was displaced then there was someone else present (the displacer)
-# so check if we had social attention 0 but displacing yes, then need to fix that
-# make sure to override if someone coded social attention 0 but I coded 1 in the detailed coding (or have them fix it in their BORIS file)
+#
 
 ## binomial model predicting whether or not they pay social attention
-# first just generally, are they more likely to pay more attention to:
-# certain age classes, certain items being opened, depending on outcome, depending on location, offset of duration and random effect of who tool user was
-# with item in
-soc_att_bm1 <- brm(attention ~ age_f + item2 + outcome + offset(log(seqduration)) + (1|subjectID) + location, data = soc_att, family = bernoulli(),
-                   iter = 1000, chains=2, cores = 4, backend = "cmdstanr", save_pars = save_pars(all = TRUE))
+# first just generally, is there more likely to be social attention for
+# certain age classes (tool user), certain age classes (observer), at certain locations, when more capuchins are present
+# in combination with scrounging? Offset of sequence duration (opportunity) and inclusion of random effect (sequenceID)
+socatt_bm1 <- brm(socatt ~ tooluser_age + observer_agesex + offset(log(seqduration)) + location + p_total + n_scr + (1|sequenceID),
+                   data = socatt_final, family = bernoulli(),
+                   iter = 2000, chains=2, cores = 2, backend = "cmdstanr", save_pars = save_pars(all = TRUE))
 # saving and loading model
-# saveRDS(soc_att_bm1, "detailedtools/RDS/soc_att_bm1.rds")
-# soc_att_bm1 <- readRDS("detailedtools/RDS/soc_att_bm1.rds")
+# saveRDS(socatt_bm1, "detailedtools/RDS/socatt_bm1.rds")
+# socatt_bm1 <- readRDS("detailedtools/RDS/socatt_bm1.rds")
 
-summary(soc_att_bm1)
-mcmc_plot(soc_att_bm1)
-plot(conditional_effects(soc_att_bm1))
-plot(soc_att_bm1)
+summary(socatt_bm1)
+mcmc_plot(socatt_bm1)
+plot(conditional_effects(socatt_bm1))
+plot(socatt_bm1)
+
+## alternatively, differentiate known and unknown juveniles (so known tool users, and likely not tool users)
+socatt_final$observer_agesex2 <- socatt_final$observer_agesex
+socatt_final$observer_agesex2[which(socatt_final$observer_agesex == "juvenile" & 
+                                      socatt_final$observerID %in% knownids$ID)] <- "juveniletool"
+table(socatt_final$observer_agesex2, socatt_final$socatt)
+## I THINK THIS DOESN'T WORK IN A FORMAL ANALYSIS
+# because we do reliably recognize juveniles when paying social attention, but not when they are just present
+# so I still think this exploration should be more descriptive (just like who receives more social attention)
+
+socatt_bm1j <- brm(socatt ~ tooluser_age + observer_agesex2 + offset(log(seqduration)) + location + p_total + n_scr + (1|sequenceID),
+                  data = socatt_final, family = bernoulli(),
+                  iter = 2000, chains=2, cores = 2, backend = "cmdstanr", save_pars = save_pars(all = TRUE))
+# saving and loading model
+# saveRDS(socatt_bm1j, "detailedtools/RDS/socatt_bm1j.rds")
+# socatt_bm1j <- readRDS("detailedtools/RDS/socatt_bm1j.rds")
+
+summary(socatt_bm1j)
+mcmc_plot(socatt_bm1j)
+plot(conditional_effects(socatt_bm1j))
+plot(socatt_bm1j)
+
 
 ## NOTE: if we want to include subject ID as random effect, need to exclude the unknowns (or ID them!)
+## NOTE: if we'd want to look at outcome or item, we don't have that much variation in the categories. Are those worth it?
+# I don't think they are super interesting per se... Is there harm to including them? maybe as random effects?
+# Interaction of agesex tool user and observer sounds interesting, but a lot of combinations do not occur so it causes convergence issues
+# maybe explore visually rather than in a model? 
+
+## MODEL 2 
+# depending on the efficiency of the tool user?
+# need to subset to when they were opened successfully
 
 # then only for when items were opened successfully and we know how efficient the tool user was (n_pounds, n_miss). 
 # more likely to pay attention to more efficient tool users? 
-soc_att_bm1b <- brm(attention ~ age_f + n_pounds + item2 +  n_misstotal + offset(log(seqduration)) + (1|subjectID) + location, data = soc_att[soc_att$outcome == "opened",], family = bernoulli(),
-                   iter = 1000, chains=2, cores = 4, backend = "cmdstanr", save_pars = save_pars(all = TRUE))
+socatt_bm1b <- brm(socatt ~ tooluser_age + observer_agesex  + n_pounds + n_misstotal + offset(log(seqduration)), 
+                   data = socatt_final[socatt_final$outcome == "opened",], family = bernoulli(),
+                   iter = 2000, chains=2, cores = 4, backend = "cmdstanr", save_pars = save_pars(all = TRUE))
 # saving and loading model
-# saveRDS(soc_att_bm1b, "detailedtools/RDS/soc_att_bm1b.rds")
-# soc_att_bm1b <- readRDS("detailedtools/RDS/soc_att_bm1b.rds")
+# saveRDS(socatt_bm1b, "detailedtools/RDS/socatt_bm1b.rds")
+# socatt_bm1b <- readRDS("detailedtools/RDS/socatt_bm1b.rds")
 
-summary(soc_att_bm1b)
-mcmc_plot(soc_att_bm1b)
-plot(conditional_effects(soc_att_bm1b))
+summary(socatt_bm1b)
+mcmc_plot(socatt_bm1b)
+plot(conditional_effects(socatt_bm1b))
 
 hypothesis(soc_att_bm1b, "Intercept  > Intercept + n_pounds", alpha = 0.05)
 
@@ -779,6 +896,26 @@ mcmc_plot(soc_att_bm1c)
 plot(conditional_effects(soc_att_bm1c))
 
 hypothesis(soc_att_bm1b, "Intercept  > Intercept + n_pounds", alpha = 0.05)
+
+### MODEL 3
+# maybe looking at, when the ID of the tool user is known, whether there are specific individuals that tolerate a lot of social attention?
+# filter to known tool user IDs
+# then have subjectID in (not as random effect but as fixed effect?)
+socatt_bm2 <- brm(socatt ~ tooluser_age + observer_agesex  + tooluserID + offset(log(seqduration)), 
+                   data = socatt_final[which(socatt_final$tooluserID %in% knownids$ID),], family = bernoulli(),
+                   iter = 2000, chains=2, cores = 2, backend = "cmdstanr", save_pars = save_pars(all = TRUE))
+# saving and loading model
+# saveRDS(socatt_bm2, "detailedtools/RDS/socatt_bm2.rds")
+# socatt_bm2 <- readRDS("detailedtools/RDS/socatt_bm2.rds")
+
+summary(socatt_bm1b)
+mcmc_plot(socatt_bm1b)
+plot(conditional_effects(socatt_bm2))
+
+table(socatt_final$tooluserID[!duplicated(socatt_final$sequenceID)],
+                              socatt_final$socialattention[!duplicated(socatt_final$sequenceID)])
+str(ind_socatt)
+ind_socatt$percentage <- (ind_socatt$Var2/(ind_socatt$Var1+ind_socatt$Var2)) * 100
 
 # consider doing a GAM with social attention depending on hour of the day?
 # might be non-linear relationship?

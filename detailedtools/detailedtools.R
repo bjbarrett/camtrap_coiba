@@ -95,6 +95,10 @@ dettools_r$sequenceID <- paste(dettools_r$location, dettools_r$mediadate, dettoo
 
 head(dettools_r$sequenceID)
 
+# if there was a comment that the ending was missed or unknown, then change outcome from "none"  to "unknown"
+dettools_r$modifier1[which(dettools_r$behavior == "seqend" & dettools_r$modifier1 == "None" &
+                             str_detect(dettools_r$comment, "unknown|missed|missing|not done|not continued|not on video|not sure|unkown|ends before|not on camera") == TRUE)] <- "Unknown"
+
 ### Extract modifiers per sequence ####
 # make dataframe with sequence_level information and populate it, then left_join at the end
 seqdat <- data.frame(sequenceID = unique(dettools_r$sequenceID))
@@ -278,6 +282,8 @@ nr_pounds <- poundsonly %>%
 colnames(nr_pounds) <- c("sequenceID", "n_pounds")
 
 dettools_r2 <- left_join(dettools_r2, nr_pounds, "sequenceID")
+# set the NA's to 0
+dettools_r2$n_pounds[which(is.na(dettools_r2$n_pounds) == TRUE)] <- 0
 
 # nr of misstrikes (true miss)
 missonly <- dettools_r2[dettools_r2$behavior == "misstrike" & str_detect(dettools_r2$mistaketype, "None") == TRUE,]
@@ -339,7 +345,7 @@ dettools_r2$n_peel[which(is.na(dettools_r2$n_peel) == TRUE)] <- 0
 # combined metric (hammer and item repositioning, not peeling)
 dettools_r2$n_reposit <- dettools_r2$n_hamreposit + dettools_r2$n_itemreposit
 
-## add age/sex to IDS
+#### add age/sex to IDS ####
 # load in file with capuchin age and sexes. KEEP THIS UP TO DATE
 capID <- read.csv("detailedtools/capuchinIDs.csv", sep = ",")
 dettools_r2 <- left_join(dettools_r2, capID, by = c("subjectID" = "ID"))
@@ -360,11 +366,25 @@ dettools_r2$deployment <- ifelse(str_detect(dettools_r2$videoID, "R11") == TRUE,
                                  ifelse(str_detect(dettools_r2$videoID, "R12") == TRUE, "R12", "R13"))
 # make variable types correct
 dettools_r2$mediadate <- as.POSIXct(dettools_r2$mediadate)
+# add split to dataframe
+dettools_r2 <- left_join(dettools_r2, seqdat[,c("sequenceID", "split")], by = "sequenceID")
+
+### Check for coding errors and fix minor mistakes #### 
 # fix occurrences of DWA after fracture (2022-03-11), should be DWA_A
 dettools_r2$hammerID[which(dettools_r2$mediadate > "2022-03-11" & dettools_r2$hammerID == "DWA")] <- "DWA_A"
 dettools_r2$hammerID2[which(dettools_r2$mediadate > "2022-03-11" & dettools_r2$hammerID2 == "DWA")] <- "DWA_A"
 
-dettools_r2 <- left_join(dettools_r2, seqdat[,c("sequenceID", "split")], by = "sequenceID")
+# some histograms to look for mistakes
+hist(dettools_r2$n_pounds)
+hist(dettools_r2$seqduration)
+max(dettools_r2$seqduration)
+ftable(dettools_r2$subjectID)
+table(dettools_r2$location, dettools_r2$deployment, dettools_r2$coder)
+hist(dettools_r2$n_reposit)
+ftable(dettools_r2$h_startloc)
+ftable(dettools_r2$h_endloc)
+unique(dettools_r2$videoID[which(dettools_r2$h_endloc == "None")])
+ftable(dettools_r2$Sex)
 
 # sequence level dataframe (only for analyzing things like nr of pounds/duration. things that are fixed per sequence)
 detseq <- dettools_r2[!duplicated(dettools_r2$sequenceID),]
