@@ -1,4 +1,4 @@
-## Detailed tool use analyses -- Analyses
+## Detailed tool use -- Analyses
 ## MPI-AB; Z Goldsborough
 
 ## Analysing efficiency of tool use and social attention paid to tool use
@@ -29,9 +29,26 @@ head(detseq)
 head(dettools_r2)
 # every row is a behavior, so this still contains every coded behavior with timestamp, no aggregation
 
+###
 ### EFFICIENCY ####
+###
 
 #### Filter and general diagnostics ####
+# how much data do we have?
+nrow(detseq)
+ftable(detseq$item)
+ftable(detseq$outcome)
+ftable(detseq$subjectID)
+mean(ftable(detseq$mediadate))
+length(unique(detseq$mediadate))
+ftable(detseq$location)
+ftable(detseq$scrounging)
+ftable(detseq$displacement)
+
+ggplot(detseq, 
+       aes(x = mediadate, fill = location)) + geom_histogram() + theme_bw()
+ftable(detseq$socatt)
+
 # only include tool use sequences that were successful (so outcome = opened) to be able to measure efficiency
 # consider variability in the items processed
 ftable(detseq$item)
@@ -40,86 +57,35 @@ ftable(detseq$item)
 # so subset to almendra's only (all levels of ripeness)
 detseq_o <- detseq[detseq$outcome == "opened" & detseq$item %in% c("almendrabrown", "almendragreen", "almendraunknown", "almendrared"),]
 
-# comparing different coders
-ggplot(detseq_o, aes(x=coder, y=n_pounds)) + 
-  geom_violin()
-
-### What is being processed when? ####
-
-# now looking only at EXP-ANV-01-R11 as that is the only one fully coded
-# later could look at all sites/times
-# for this plot exclude really rare items
-ggplot(detseq[detseq$location == "CEBUS-02" & 
-                detseq$item %in% c("almendrabrown", "almendragreen", "almendraunknown", "almendrared"),], 
-       aes(x = mediadate, fill = item)) + geom_histogram() + theme_bw() + facet_wrap(~item)
-
-## GAM model
-# multinomial model (?) item being processed depending on day of the year*location interaction
-# make month variable
-detseq$month <- month(detseq$mediadate)
-# for now don't have enough years, but later could include year
-detseq$year <- year(detseq$mediadate)
-
-detseq_gam <- detseq[detseq$item %in% c("almendrabrown", "almendragreen", "almendraunknown", "almendrared"),]
-detseq_gam$itemF <- as.factor(detseq_gam$item)
-detseq_gam$locationF <- as.factor(detseq_gam$location)
-
-# brms
-# smooth version 
-alm_bm1 <- brm(itemF ~ s(month, bs ="cc", k = 11, by = locationF) + locationF, data=detseq_gam, family="categorical", 
-               knots = list(month = c(0.5,12.5)), chains=2, cores = 4, backend = "cmdstanr", save_pars = save_pars(all = TRUE),
-               iter = 1000)
-
-# saveRDS(alm_bm1, file = "detailedtools/RDS/alm_bm1.rds")
-# alm_bm1 <- readRDS("detailedtools/RDS/alm_bm1.rds")
-
-summary(alm_bm1)
-mcmc_plot(alm_bm1)
-plot(conditional_smooths(alm_bm1, categorical = TRUE))
-plot(conditional_effects(alm_bm1, categorical = TRUE))
-
-# best plot
-conditions <- make_conditions(alm_bm1, "locationF")
-alm_plot <- plot(conditional_effects(alm_bm1, categorical = TRUE, conditions = conditions), plot = FALSE)[[2]]
-alm_plot + theme_bw()
-
-### Efficiency ####
-## Comparing efficiency between age classes on opened sequences, multiple measures
-# 1. Sequence duration (seconds) 
-# 2. Number of pounds to open item 
-# 3. Number of misstrikes
-# 4. Number of repositions
-
-## Other things that likely affect these variables are:
-# The specific item being processed
-# The type of anvil (wood or stone)
-# The hammerstone (when we have reliable IDs, include hammerstone ID as random effect)
-# Identity of tool user (when we only use subset with identified individuals, random effect)
-# Whether sequence is split across two videos or not (with pounds miss some, durations are longer)
-
-### IF SEQUENCE IS SPLIT then we can "reliably" still look at the duration of the sequence in seconds (though likely overestimation?)
-# but to be safe probably shouldnt include these when looking at number of pounds as we miss at least 1 (maybe more) pounds in between
-# maybe exclude them in general if we have enough data, think about it
-# definitely include whether it was split yes/no as a random effect/fixed effect 
-
+# assess quantity and quality of data
+ggplot(detseq_o, aes(x=coder, y=n_pounds)) + geom_violin()
+table(detseq_o$location, detseq_o$deployment)
+ftable(detseq_o$subjectID) # for vast majority of sequences we can identify the tool user
+ftable(detseq_o$Age) # most sequences are by subadults, but good range of the different age classes
 nrow(detseq_o)
-# so at the moment have 3204 sequences
-# filter to the best of the best (where individuals are known), of course should still check as many unidentified ones as possible
-ftable(detseq_o$subjectID)
-# we have total of 59 ones with not ID, those I think I can fix (probably)
-# also exclude splits
+# so at the moment have 3203 sequences
+
+# subset to the best of the best: known individuals, and no split videos
+# Split videos (spanning several videos) likely miss pounds, and as such are not reliable measures of efficiency
+ftable(detseq_o$split) # exclude 254 split sequences 
+ftable(detseq_o$subjectID) # exclude 59 not ID'd sequences 
 detseq_oi <- detseq_o[!detseq_o$subjectID %in% c("adultmale", "subadultmale", "juvenileunknown") & detseq_o$split == FALSE,]
-# exclude ones were we missed all pounds (so n_pounds = NA)
-detseq_oi <- detseq_oi[!is.na(detseq_oi$n_pounds) == TRUE,]
 nrow(detseq_oi)
-# then end up with 2879 sequences
+ftable(detseq_oi$Age)
+# then end up with 2890 sequences
 
 # make age a factor in the right order (for plotting)
 detseq_oi$Age <- factor(detseq_oi$Age, levels = c("Juvenile", "Subadult", "Adult"))
 
-#### 1. Sequence duration #####
+#### Analyses ####
+## Comparing efficiency between age classes on opened sequences, multiple measures
+## Other factors that likely affect efficiency are:
+# The ripeness of the sea almond
+# The type of anvil (wood or stone)
+# The identity of the tool user
 
-## determine distribution, what family is best?
+##### 1. Sequence duration (seconds) #####
+## determine distribution
 descdist(detseq_oi$seqduration)
 hist(detseq_oi$seqduration)
 
@@ -128,19 +94,22 @@ plot(testdist1.1)
 
 testdist1.2 <- fitdist(detseq_oi$seqduration, "gamma")
 plot(testdist1.2)
+# Gamma appears best 
 
-# Gamma appears best (for now)
-
-## Model 1: Duration depending on age, including item, anviltype, and individual ID as random effect
+### Model_e1 ###
+# Outcome: sequence duration (seconds)
+# Fixed effects: age, item (ripeness of sea almond) and anviltype (wood or stone) also in interaction
+# Random effects: subjectID (identity of tool user)
 m_e1 <- brm(seqduration ~ Age + item*anviltype + (1|subjectID), data = detseq_oi, iter = 2000, 
-            save_pars = save_pars(all = TRUE), chain = 2, core = 2, backend = "cmdstanr", control = list(adapt_delta = 0.99),
-            family = "gamma")
+            save_pars = save_pars(all = TRUE), chain = 2, core = 2, backend = "cmdstanr", 
+            control = list(adapt_delta = 0.99), family = "gamma")
 # m_e1 <- add_criterion(m_e1, c("loo", "loo_R2", "bayes_R2"), reloo = TRUE, backend = "cmdstanr", ndraws = 2000) 
-# saving model if you dont want to have to run it again
-# saveRDS(m_e1, "detailedtools/RDS/m_e1.rds")
-#m_e1 <- readRDS("detailedtools/RDS/m_e1.rds")
 
-# diagnostics
+# saving model to not have to run it again
+# saveRDS(m_e1, "detailedtools/RDS/m_e1.rds")
+# m_e1 <- readRDS("detailedtools/RDS/m_e1.rds")
+
+# Diagnostics
 summary(m_e1)
 mcmc_plot(m_e1)
 pp_check(m_e1)
@@ -152,24 +121,25 @@ round(bayes_R2(m_e1),2) # 0.23
 
 plot(m_e1$criteria$loo, label_points = TRUE)
 
+
+# Interpretation
 round(exp(2.99),2)
 
 hypothesis(m_e1, "Intercept  > Intercept + AgeSubadult", alpha = 0.05)
 hypothesis(m_e1, "Intercept  > Intercept + AgeAdult", alpha = 0.05)
 hypothesis(m_e1, "Intercept + AgeAdult  < Intercept + AgeSubadult", alpha = 0.05)
 
-#report(m_e1, include_effectsize = FALSE)
+# report(m_e1)
 
-# visualize
-# make violin plot
+# Visualization
 m_type_pred <- m_e1 %>% 
   epred_draws(newdata = tibble(item = detseq_oi$item,
                                Age = detseq_oi$Age,
                                anviltype = detseq_oi$anviltype,
                                subjectID = detseq_oi$subjectID))
 
-# age difference in duration to open item
-#png("detailedtools/RDS/m_e1_seqduration.png", width = 8, height = 7, units = 'in', res = 300)
+# Age difference in duration to open item
+# png("detailedtools/RDS/m_e1_age.png", width = 8, height = 7, units = 'in', res = 300)
 ggplot(data = m_type_pred, aes(x = Age, y = .epred)) + geom_violin(aes(color = Age, fill = Age), alpha = 0.4)  +
   stat_summary(detseq_oi, inherit.aes = FALSE, mapping=aes(x = Age, y = seqduration, color = Age), geom = "point", fun = "mean",
                size = 4) +
@@ -179,9 +149,10 @@ ggplot(data = m_type_pred, aes(x = Age, y = .epred)) + geom_violin(aes(color = A
   labs(x = "Age", y = "Seconds required to open item") +
   theme_bw() + theme(axis.text = element_text(size = 12),
                      axis.title = element_text(size = 14))
-#dev.off()
+# dev.off()
 
-# item difference in duration to open item
+# Sea almond ripeness difference in duration to open item
+# png("detailedtools/RDS/m_e1_item.png", width = 8, height = 7, units = 'in', res = 300)
 ggplot(data = m_type_pred, aes(x = item, y = .epred)) + geom_violin(aes(color = item, fill = item), alpha = 0.4) + ylim(0,100) +
   stat_summary(detseq_oi, inherit.aes = FALSE, mapping=aes(x = item, y = seqduration, color = item), geom = "point", fun = "mean",
                size = 4) +
@@ -191,47 +162,53 @@ ggplot(data = m_type_pred, aes(x = item, y = .epred)) + geom_violin(aes(color = 
   labs(x = "Item type", y = "Seconds required to open item") +
   theme_bw() + theme(axis.text = element_text(size = 12),
                      axis.title = element_text(size = 14)) 
+# dev.off()
 
-#### 2. Number of pounds #####
+
+##### 2. Number of pounds ######
 descdist(detseq_oi$n_pounds)
 
 testdist2.1 <- fitdist(detseq_oi$n_pounds, "pois")
 plot(testdist2.1)
+# Poisson is best family
 
-# Model 2: Number of pounds depending on age, including item, anviltype, and individual ID as random effect
-m_e2 <- brm(n_pounds ~ Age + item*anviltype + (1|subjectID), data = detseq_oi, family = "poisson", iter = 2000, 
-            chain = 3, core = 3, save_pars = save_pars(all = TRUE), control = list(adapt_delta = 0.99), backend = "cmdstanr")
+### Model_e2 ###
+# Outcome: number of pounds
+# Fixed effects: age, interaction of item and anviltype
+# Random effects: subjectID
+m_e2 <- brm(n_pounds ~ Age + item*anviltype + (1|subjectID), data = detseq_oi, family = "poisson", 
+            iter = 2000, chain = 3, core = 3, save_pars = save_pars(all = TRUE), 
+            control = list(adapt_delta = 0.99), backend = "cmdstanr")
+# m_e2 <- add_criterion(m_e2, c("loo", "loo_R2", "bayes_R2"), reloo = TRUE, backend = "cmdstanr", ndraws = 2000) 
+
 # save and load model
 # saveRDS(m_e2, "detailedtools/RDS/m_e2.rds")
 # m_e2 <- readRDS("detailedtools/RDS/m_e2.rds")
 
-# diagnostics
+# Diagnostics
 summary(m_e2)
 pp_check(m_e2)
 mcmc_plot(m_e2)
 plot(conditional_effects(m_e2))
 
 loo(m_e2) # all cases good
-loo_R2(m_e2) # 0.11
+loo_R2(m_e2) # 0.12
 round(bayes_R2(m_e2),2) # 0.12
 
+# Interpretation
 round(exp(1.66),2)
-
-
-# to test hypotheses
 hypothesis(m_e1, "Intercept  < Intercept + itemalmendragreen", alpha = 0.05)
 hypothesis(m_e2, "Intercept > Intercept + AgeAdult", alpha = 0.05)
 
-# visualizing
-# make violin plot
+# Visualization
 m_type_pred2 <- m_e2 %>% 
   epred_draws(newdata = tibble(item = detseq_oi$item,
                                Age = detseq_oi$Age,
                                anviltype = detseq_oi$anviltype,
                                subjectID = detseq_oi$subjectID))
 
-# age difference in number of pounds to open item
-#png("detailedtools/RDS/m_e1_pound.png", width = 8, height = 7, units = 'in', res = 300)
+# Age difference in number of pounds to open item
+# png("detailedtools/RDS/m_e2_pound.png", width = 8, height = 7, units = 'in', res = 300)
 ggplot(data = m_type_pred2, aes(x = Age, y = .epred)) + geom_violin(aes(color = Age, fill = Age), alpha = 0.4) +
   stat_summary(detseq_oi, inherit.aes = FALSE, mapping=aes(x = Age, y = n_pounds, color = Age), geom = "point", fun = "mean",
                size = 4) +
@@ -241,9 +218,9 @@ ggplot(data = m_type_pred2, aes(x = Age, y = .epred)) + geom_violin(aes(color = 
   labs(x = "Age", y = "Number of pounds required to open item") +
   theme_bw() + theme(axis.text = element_text(size = 12),
                      axis.title = element_text(size = 14))
-#dev.off()
+# dev.off()
 
-# item difference in number of pounds to open item
+# Item difference in number of pounds to open item
 ggplot(data = m_type_pred2, aes(x = item, y = .epred)) + geom_violin(aes(color = item, fill = item), alpha = 0.4) +
   stat_summary(detseq_oi[which(detseq_oi$item %in% c("almendrabrown", "almendragreen")),], inherit.aes = FALSE, mapping=aes(x = item, y = n_pounds, color = item), geom = "point", fun = "mean",
                size = 4) +
@@ -254,72 +231,42 @@ ggplot(data = m_type_pred2, aes(x = item, y = .epred)) + geom_violin(aes(color =
   theme_bw() + theme(axis.text = element_text(size = 12),
                      axis.title = element_text(size = 14)) 
 
-#### 2a. Number of pounds per second (with offset of sequence duration) #####
-# relationship between nr of pounds and how long the sequence lasts
-ggplot(detseq_oi, aes(y = seqduration, x = n_pounds, color = Age, shape = Age)) + geom_point(size = 3) + geom_smooth() + 
+# relationship between nr of pounds and sequence duration
+# png("detailedtools/RDS/duration_pound.png", width = 8, height = 7, units = 'in', res = 300)
+ggplot(detseq_oi, aes(y = seqduration, x = n_pounds, color = Age, shape = Age)) + geom_point(size = 3, alpha = 0.3) + geom_smooth() + 
   scale_color_viridis_d(option = "plasma", end = 0.8) +
   labs(y = "Seconds needed to open item", x = "Number of pounds needed to open item") +
   theme_bw() + theme(axis.text = element_text(size = 12),
                      axis.title = element_text(size = 14)) 
+# dev.off()
 
+##### 3. Number of mistakes ######
+# we coded three different "types" of mistakes: the item flying off, dropping the hammer, and general misstrikes (not hitting the item)
+ftable(detseq_oi$n_miss)
+ftable(detseq_oi$n_flies)
+ftable(detseq_oi$n_hloss)
+# in all cases mistakes are very rare, so these models are heavily zero-inflated
+ftable(detseq_oi$n_misstotal)
 
-# Model 2a: Number of pounds depending on age, including item, anviltype, and individual ID as random effect, and sequence duration as offset
-m_e2a <- brm(n_pounds ~ Age + item*anviltype + (1|subjectID) + offset(log(seqduration)), data = detseq_oi, family = "poisson", 
-             iter = 2000, chain = 3, core = 3, save_pars = save_pars(all = TRUE), control = list(adapt_delta = 0.99), backend = "cmdstanr")
-# save and load model
-# saveRDS(m_e2a, "detailedtools/RDS/m_e2a.rds")
-# m_e2a <- readRDS("detailedtools/RDS/m_e2a.rds")
-
-# diagnostics
-summary(m_e2a)
-pp_check(m_e2a)
-mcmc_plot(m_e2a)
-plot(conditional_effects(m_e2a))
-
-loo(m_e2a) # all cases good
-loo_R2(m_e2a) # 0.38
-round(bayes_R2(m_e2a),2) # 0.69
-
-# to test hypotheses
-hypothesis(m_e2a, "Intercept  > Intercept + anviltypewood", alpha = 0.05)
-hypothesis(m_e2a, "Intercept  < Intercept + AgeJuvenile", alpha = 0.05)
-
-# visualizing
-# make violin plot
-m_type_pred2 <- m_e2a %>% 
-  epred_draws(newdata = tibble(item = detseq_oi$item,
-                               Age = detseq_oi$Age,
-                               anviltype = detseq_oi$anviltype,
-                               subjectID = detseq_oi$subjectID,
-                               seqduration = detseq_oi$seqduration))
-
-# age difference in number of pounds to open item (offset duration)
-ggplot(data = m_type_pred2, aes(x = Age, y = .epred)) + geom_violin(aes(color = Age, fill = Age), alpha = 0.4) +
-  stat_summary(detseq_oi, inherit.aes = FALSE, mapping=aes(x = Age, y = n_pounds, color = Age), geom = "point", fun = "mean",
-               size = 4) +
-  scale_fill_viridis_d(option = "plasma", end = 0.8) +
-  scale_color_viridis_d(option = "plasma", end = 0.8) +
-  guides(color = "none", fill = "none") +
-  labs(x = "Age", y = "Number of pounds required to open item") +
-  theme_bw() + theme(axis.text = element_text(size = 12),
-                     axis.title = element_text(size = 14))
-
-#### 3. Number of mistakes #####
-
-# look at item flying, hammer loss and missing separately
-# are items more likely to fly on stone or wood?
+# anvil type could play a big role here, with items being more likely to fly off on some material
 t.test(detseq_oi$n_flies ~ as.factor(detseq_oi$anviltype))
-# seems like flying happens more at stone than wood ( but also coded more there now)
+# see more flying on stone than on wood
+
+# do not pool the different mistakes together, since different processes might underlie them
 
 ## 3a: True misses (n_miss)
 descdist(detseq_oi$n_miss)
 testdist3.1 <- fitdist(detseq_oi$n_miss, "pois")
 plot(testdist3.1)
+# use a zero-inflated poisson
 
-# Model 3a: Number of misstrikes (true misses) depending on age, item, anviltype and subjectID as random effect
-## ZERO-INFLATED POISSON
-m_e3a <- brm(n_miss ~ Age + item*anviltype + (1|subjectID), data = detseq_o, family = zero_inflated_poisson, 
-             iter = 1000, chain = 2, core = 2, save_pars = save_pars(all = TRUE), backend = "cmdstanr", control = list(adapt_delta = 0.99))
+### Model_e3a ### 
+# Outcome: number of misstrikes (true misses)
+# Fixed effects: age, interaction of item and anviltype
+# Random effects: subjectID
+m_e3a <- brm(n_miss ~ Age + item + anviltype + (1|subjectID), data = detseq_oi, family = zero_inflated_poisson, 
+             iter = 2000, chain = 2, core = 2, save_pars = save_pars(all = TRUE), backend = "cmdstanr", control = list(adapt_delta = 0.99))
+# m_e3a <- add_criterion(m_e3a, c("loo", "loo_R2", "bayes_R2"), reloo = TRUE, backend = "cmdstanr", ndraws = 2000) 
 # saving and loading model
 # saveRDS(m_e3a, "detailedtools/RDS/m_e3a.rds")
 # m_e3a <- readRDS("detailedtools/RDS/m_e3a.rds")
@@ -1097,3 +1044,44 @@ ftable(detseq_o$scrounging)
 
 ftable(dettools_r2$mistaketype)
 ftable(dettools_r2$repostype)
+
+##### seasonality #######
+### What is being processed when? ####
+
+# now looking only at EXP-ANV-01-R11 as that is the only one fully coded
+# later could look at all sites/times
+# for this plot exclude really rare items
+ggplot(detseq[detseq$location == "CEBUS-02" & 
+                detseq$item %in% c("almendrabrown", "almendragreen", "almendraunknown", "almendrared"),], 
+       aes(x = mediadate, fill = item)) + geom_histogram() + theme_bw() + facet_wrap(~item)
+
+## GAM model
+# multinomial model (?) item being processed depending on day of the year*location interaction
+# make month variable
+detseq$month <- month(detseq$mediadate)
+# for now don't have enough years, but later could include year
+detseq$year <- year(detseq$mediadate)
+
+detseq_gam <- detseq[detseq$item %in% c("almendrabrown", "almendragreen", "almendraunknown", "almendrared"),]
+detseq_gam$itemF <- as.factor(detseq_gam$item)
+detseq_gam$locationF <- as.factor(detseq_gam$location)
+
+# brms
+# smooth version 
+alm_bm1 <- brm(itemF ~ s(month, bs ="cc", k = 11, by = locationF) + locationF, data=detseq_gam, family="categorical", 
+               knots = list(month = c(0.5,12.5)), chains=2, cores = 4, backend = "cmdstanr", save_pars = save_pars(all = TRUE),
+               iter = 1000)
+
+# saveRDS(alm_bm1, file = "detailedtools/RDS/alm_bm1.rds")
+# alm_bm1 <- readRDS("detailedtools/RDS/alm_bm1.rds")
+
+summary(alm_bm1)
+mcmc_plot(alm_bm1)
+plot(conditional_smooths(alm_bm1, categorical = TRUE))
+plot(conditional_effects(alm_bm1, categorical = TRUE))
+
+# best plot
+conditions <- make_conditions(alm_bm1, "locationF")
+alm_plot <- plot(conditional_effects(alm_bm1, categorical = TRUE, conditions = conditions), plot = FALSE)[[2]]
+alm_plot + theme_bw()
+
