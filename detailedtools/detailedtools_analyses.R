@@ -98,9 +98,9 @@ plot(testdist1.2)
 
 ### Model_e1 ###
 # Outcome: sequence duration (seconds)
-# Fixed effects: age, item (ripeness of sea almond) and anviltype (wood or stone) also in interaction
+# Fixed effects: age, item (ripeness of sea almond) and anviltype (wood or stone) 
 # Random effects: subjectID (identity of tool user)
-m_e1 <- brm(seqduration ~ Age + item*anviltype + (1|subjectID), data = detseq_oi, iter = 2000, 
+m_e1 <- brm(seqduration ~ Age + item + anviltype + (1|subjectID), data = detseq_oi, iter = 2000, 
             save_pars = save_pars(all = TRUE), chain = 2, core = 2, backend = "cmdstanr", 
             control = list(adapt_delta = 0.99), family = "gamma")
 # m_e1 <- add_criterion(m_e1, c("loo", "loo_R2", "bayes_R2"), reloo = TRUE, backend = "cmdstanr", ndraws = 2000) 
@@ -121,13 +121,13 @@ round(bayes_R2(m_e1),2) # 0.23
 
 plot(m_e1$criteria$loo, label_points = TRUE)
 
-
 # Interpretation
 round(exp(2.99),2)
 
 hypothesis(m_e1, "Intercept  > Intercept + AgeSubadult", alpha = 0.05)
 hypothesis(m_e1, "Intercept  > Intercept + AgeAdult", alpha = 0.05)
 hypothesis(m_e1, "Intercept + AgeAdult  < Intercept + AgeSubadult", alpha = 0.05)
+hypothesis(m_e1, "Intercept < Intercept + itemalmendragreen", alpha = 0.05)
 
 # report(m_e1)
 
@@ -174,9 +174,9 @@ plot(testdist2.1)
 
 ### Model_e2 ###
 # Outcome: number of pounds
-# Fixed effects: age, interaction of item and anviltype
+# Fixed effects: age, item, and anviltype
 # Random effects: subjectID
-m_e2 <- brm(n_pounds ~ Age + item*anviltype + (1|subjectID), data = detseq_oi, family = "poisson", 
+m_e2 <- brm(n_pounds ~ Age + item + anviltype + (1|subjectID), data = detseq_oi, family = "poisson", 
             iter = 2000, chain = 3, core = 3, save_pars = save_pars(all = TRUE), 
             control = list(adapt_delta = 0.99), backend = "cmdstanr")
 # m_e2 <- add_criterion(m_e2, c("loo", "loo_R2", "bayes_R2"), reloo = TRUE, backend = "cmdstanr", ndraws = 2000) 
@@ -196,7 +196,7 @@ loo_R2(m_e2) # 0.12
 round(bayes_R2(m_e2),2) # 0.12
 
 # Interpretation
-round(exp(1.66),2)
+round(exp(1.64),2)
 hypothesis(m_e1, "Intercept  < Intercept + itemalmendragreen", alpha = 0.05)
 hypothesis(m_e2, "Intercept > Intercept + AgeAdult", alpha = 0.05)
 
@@ -242,11 +242,12 @@ ggplot(detseq_oi, aes(y = seqduration, x = n_pounds, color = Age, shape = Age)) 
 
 ##### 3. Number of mistakes ######
 # we coded three different "types" of mistakes: the item flying off, dropping the hammer, and general misstrikes (not hitting the item)
-ftable(detseq_oi$n_miss)
-ftable(detseq_oi$n_flies)
-ftable(detseq_oi$n_hloss)
+table(detseq_oi$n_miss, detseq_oi$Age)
+table(detseq_oi$n_flies, detseq_oi$Age)
+ftable(detseq_oi$n_hloss, detseq_oi$Age)
 # in all cases mistakes are very rare, so these models are heavily zero-inflated
 ftable(detseq_oi$n_misstotal)
+sum(detseq_oi$n_misstotal)
 
 # anvil type could play a big role here, with items being more likely to fly off on some material
 t.test(detseq_oi$n_flies ~ as.factor(detseq_oi$anviltype))
@@ -262,11 +263,12 @@ plot(testdist3.1)
 
 ### Model_e3a ### 
 # Outcome: number of misstrikes (true misses)
-# Fixed effects: age, interaction of item and anviltype
+# Fixed effects: age, item, and anviltype
 # Random effects: subjectID
 m_e3a <- brm(n_miss ~ Age + item + anviltype + (1|subjectID), data = detseq_oi, family = zero_inflated_poisson, 
              iter = 2000, chain = 2, core = 2, save_pars = save_pars(all = TRUE), backend = "cmdstanr", control = list(adapt_delta = 0.99))
 # m_e3a <- add_criterion(m_e3a, c("loo", "loo_R2", "bayes_R2"), reloo = TRUE, backend = "cmdstanr", ndraws = 2000) 
+
 # saving and loading model
 # saveRDS(m_e3a, "detailedtools/RDS/m_e3a.rds")
 # m_e3a <- readRDS("detailedtools/RDS/m_e3a.rds")
@@ -276,6 +278,14 @@ summary(m_e3a)
 mcmc_plot(m_e3a)
 pp_check(m_e3a)
 plot(conditional_effects(m_e3a))
+
+loo(m_e3a) # all cases good
+loo_R2(m_e3a) # 0.17
+round(bayes_R2(m_e3a),2) # 0.16
+
+# Interpretation
+round(exp(-0.77-3.63),2) * 0.48
+hypothesis(m_e3a, "Intercept > Intercept + AgeAdult", alpha = 0.05)
 
 # make violin plot
 m_type_pred3 <- m_e3a %>% 
@@ -297,12 +307,16 @@ ggplot(data = m_type_pred3, aes(x = Age, y = .epred)) + geom_boxplot(aes(color =
 
 ## 3b: Item flying (itemflies)
 
-# Model 3b: Number of item flies depending on age, item, anviltype and subjectID as random effect
-## ZERO-INFLATED POISSON
-m_e3b <- brm(n_flies ~ Age + item*anviltype + (1|subjectID), data = detseq_o, 
-             family = zero_inflated_poisson, iter = 1000, chain = 2, core = 2, 
+### Model_e3b ### 
+# Outcome: number of itemflies (item flying off)
+# Fixed effects: age, item, and anviltype
+# Random effects: subjectID
+m_e3b <- brm(n_flies ~ Age + item + anviltype + (1|subjectID), data = detseq_oi, 
+             family = zero_inflated_poisson, iter = 2000, chain = 2, core = 2, 
              save_pars = save_pars(all = TRUE),
              backend = "cmdstanr", control = list(adapt_delta = 0.99))
+# m_e3b <- add_criterion(m_e3b, c("loo", "loo_R2", "bayes_R2"), reloo = TRUE, backend = "cmdstanr", ndraws = 2000) 
+
 # saving and loading model
 # saveRDS(m_e3b, "detailedtools/RDS/m_e3b.rds")
 # m_e3b <- readRDS("detailedtools/RDS/m_e3b.rds")
@@ -312,6 +326,14 @@ summary(m_e3b)
 mcmc_plot(m_e3b)
 pp_check(m_e3b)
 plot(conditional_effects(m_e3b))
+
+loo(m_e3b) # all cases good
+loo_R2(m_e3b) # 0.10
+round(bayes_R2(m_e3b),2) # 0.13
+
+# Interpretation
+round(exp(-1.08),2) * 0.40
+hypothesis(m_e3b, "Intercept > Intercept + AgeAdult", alpha = 0.05)
 
 # make violin plot
 m_type_pred3b <- m_e3b %>% 
@@ -332,12 +354,16 @@ ggplot(data = m_type_pred3b, aes(x = Age, y = .epred)) + geom_boxplot(aes(color 
                      axis.title = element_text(size = 14)) 
 
 ## 3c: Losing hammer (hammerlost)
-
-# Model 3c: Number of hammer losses depending on age, item, anviltype and subjectID as random effect
+ftable(detseq_oi$n_hloss, detseq_oi$item)
+# Model 3c: Number of hammer losses depending on age
+# subjectID as random effect
 ## ZERO-INFLATED POISSON
-m_e3c <- brm(n_hloss ~ Age + item*anviltype + (1|subjectID), data = detseq_o, 
-             family = zero_inflated_poisson, iter = 1000, chain = 2, core = 2, 
-             save_pars = save_pars(all = TRUE), backend = "cmdstanr", control = list(adapt_delta = 0.99))
+m_e3c <- brm(n_hloss ~ Age + (1|subjectID), data = detseq_oi, 
+             family = zero_inflated_poisson, iter = 2000, chain = 2, core = 2, 
+             save_pars = save_pars(all = TRUE), backend = "cmdstanr", 
+             control = list(adapt_delta = 0.99))
+ m_e3c <- add_criterion(m_e3c, c("loo", "loo_R2", "bayes_R2"), reloo = TRUE, backend = "cmdstanr", ndraws = 2000) 
+
 # saving and loading model
 # saveRDS(m_e3c, "detailedtools/RDS/m_e3c.rds")
 # m_e3c <- readRDS("detailedtools/RDS/m_e3c.rds")
@@ -365,6 +391,23 @@ ggplot(data = m_type_pred3c, aes(x = Age, y = .epred)) + geom_boxplot(aes(color 
   labs(x = "Age", y = "Average number of hammer losses per tool use sequence") +
   theme_bw() + theme(axis.text = element_text(size = 12),
                      axis.title = element_text(size = 14)) 
+
+## 3d: all mistakes together
+
+# Model 3d: Number of hammer losses depending on age, item, anviltype and subjectID as random effect
+## ZERO-INFLATED POISSON
+m_e3d <- brm(n_misstotal ~ Age + item + anviltype + (1|subjectID), data = detseq_oi, 
+             family = zero_inflated_poisson, iter = 2000, chain = 2, core = 2, 
+             save_pars = save_pars(all = TRUE), backend = "cmdstanr", 
+             control = list(adapt_delta = 0.99))
+# m_e3d <- add_criterion(m_e3d, c("loo", "loo_R2", "bayes_R2"), reloo = TRUE, backend = "cmdstanr", ndraws = 2000) 
+
+# saving and loading model
+# saveRDS(m_e3d, "detailedtools/RDS/m_e3d.rds")
+# m_e3d <- readRDS("detailedtools/RDS/m_e3d.rds")
+
+
+
 
 # individual variation in how many mistakes are made
 # only take individuals with enough sequences observed
