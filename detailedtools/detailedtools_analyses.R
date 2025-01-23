@@ -5,6 +5,7 @@
 
 ## packages needed
 library(stringr)
+library(viridis)
 library(dplyr)
 library(tidyr)
 library(brms)
@@ -16,6 +17,8 @@ library(lubridate)
 library(mgcv)
 library(gratia)
 library(easystats)
+library(scales)
+library(ggh4x)
 
 ## NOTES ###
 # If we have enough data, ideally exclude sequences that are split across multiple videos (split == TRUE) and of which outcome is unknown
@@ -29,11 +32,8 @@ head(detseq)
 head(dettools_r2)
 # every row is a behavior, so this still contains every coded behavior with timestamp, no aggregation
 
-###
-### EFFICIENCY ####
-###
-
-#### Filter and general diagnostics ####
+### Filter and general diagnostics ###
+## Efficiency coding ##
 # how much data do we have?
 nrow(detseq)
 ftable(detseq$item)
@@ -77,7 +77,129 @@ ftable(detseq_oi$Age)
 # make age a factor in the right order (for plotting)
 detseq_oi$Age <- factor(detseq_oi$Age, levels = c("Juvenile", "Subadult", "Adult"))
 
-#### Analyses ####
+
+## Social attention ##
+## TEMPORARY CHECK WHAT STILL TO CODE
+soc_att <- detseq[!detseq$socatt == "None",]
+socatt_vidnames <- soc_att[,c("videoID", "coder", "subjectID", "socatt", "scrounging", "displacement")]
+# filter to ones not coded yet
+# load in coding
+socatt_c <- read.csv("detailedtools/socialattentioncoding.csv")
+tocode <- socatt_vidnames[!socatt_vidnames$videoID %in% socatt_c$Observation.id,]
+tocode[0:nrow(tocode),]
+
+## social attention coding dataframes, two levels
+head(socatt_seq) # aggregated to sequence
+head(socatt_ct) # every row a behavior occurrence
+
+# add variable whether there is social attention in the sequence
+socsequences <- unique(socatt_ct$sequenceID[which(socatt_ct$behavior == "socialattention")])
+socatt_ct$socatt <- ifelse(socatt_ct$sequenceID %in% socsequences, 1, 0)
+socatt_cts <- socatt_ct[socatt_ct$behavior == "socialattention",]
+
+#make dataframe with already all presence without social attention
+socatt_final <- socatt_ct[socatt_ct$behavior == "present" & socatt_ct$socatt == 0,]
+
+# work on the sequence level
+for(i in 1:length(socsequences)){
+  observers <- socatt_cts$subjectID[which(socatt_cts$sequenceID == socsequences[i])]
+  seq_present <- socatt_ct[socatt_ct$sequenceID == socsequences[i] & socatt_ct$behavior == "present",]
+  # set all socatt to 0 except for the individual paying social attention 
+  seq_present$socatt <- 0
+  #easiest to match for each observer
+  # for first observer, just take first line with matching presence 
+  # (e.g. if there are multiple juveniles just take the first, and make it a 1)
+  seq_present$socatt[which(seq_present$subjectID == observers[1])][1] <- 1
+  if(length(observers) > 1) {
+    # to avoid making the same one 1 again, subset to those still 0
+    seq_present$socatt[which(seq_present$subjectID == observers[2] & seq_present$socatt == 0)][1] <- 1
+  }
+  if(length(observers) > 2) {
+    seq_present$socatt[which(seq_present$subjectID == observers[3] & seq_present$socatt == 0)][1] <- 1
+  }
+  socatt_final <- rbind(socatt_final, seq_present)
+}
+
+socatt_final <- socatt_final[order(socatt_final$sequenceID),]
+# in this sample, we have:
+length(unique(socatt_final$sequenceID))
+# 992 sequences with capuchins present
+# now attach the relevant information from the main dataframe (information on the tool user etc)
+head(detseq)
+detseq$socialattention <- detseq$socatt
+
+socatt_final <- left_join(socatt_final, detseq[,c("sequenceID", "subjectID", "coder", "location", "item",
+                                                  "outcome", "displacement", "scrounging", "socialattention",
+                                                  "anviltype", "seqduration", "n_pounds", "n_misstotal",
+                                                  "Age", "deployment", "split", "hammerswitches", "anvilswitches")],
+                          by = "sequenceID")
+
+# also add more detailed information on number of capuchins present, number scrounging etc, from the social coding
+head(socatt_seq)
+socatt_final <- left_join(socatt_final, socatt_seq[,c("sequenceID", "n_socatt", "n_disp", "n_scr", "p_total")],
+                          by = "sequenceID")
+
+######### TEMPORARY UNTIL ALL CODING IS DONE
+# CHECK IF SCORUNGING/DISPLACEMENT/SOCATT TRACKED
+table(socatt_final$socialattention, socatt_final$n_socatt)
+# generate list of incongruities to fix
+checklist <- unique(socatt_final$sequenceID[socatt_final$n_disp == 0 & socatt_final$displacement == "fulldisp"| 
+                                             socatt_final$n_disp > 0 & socatt_final$displacement == "None" |
+                                             socatt_final$n_disp >0 & socatt_final$displacement == "nodisplacement"|
+                                       socatt_final$n_scr == 0 & socatt_final$scrounging == "scrounging" |
+                                       socatt_final$n_scr > 0 & socatt_final$scrounging == "None" |
+                                       socatt_final$n_scr > 0 & socatt_final$scrounging == "noscrounging" |
+                                       socatt_final$n_socatt >0 & socatt_final$socialattention == "noattention"|
+                                         socatt_final$n_socatt ==0 & socatt_final$socialattention == "socialattention"])
+# check the checklist files, first in the social attention coding to see if that is correct
+# if that is correct, then these need to be changed in the original BORIS coding
+# change the ones I can, and have Leonie changes the ones in her and Meredith's coding
+#############################
+
+# clean up the final dataframe
+head(socatt_final)
+# subjectID.x = observer, coder.x = coder of social attention
+socatt_final$observerID <- socatt_final$subjectID.x
+socatt_final$tooluserID <- socatt_final$subjectID.y
+socatt_final$coder_socatt <- socatt_final$coder.x
+socatt_final$coder_tooluse <- socatt_final$coder.y
+socatt_final$observer_agesex <- ifelse(str_detect(socatt_final$agesex, "juvenile"), "juvenile", socatt_final$agesex)
+socatt_final$tooluser_age <- socatt_final$Age
+# variable for if there is social attention in sequence
+socatt_final$socialattention <- ifelse(socatt_final$sequenceID %in% socsequences, "socialattention", "nosocialattention")
+
+socatt_final <- socatt_final[,c("sequenceID", "videoID", "deployment", "location", "anviltype", "seqduration", "coder_socatt", 
+                                "coder_tooluse", "split", "item", "observerID", "observer_agesex", "socatt","tooluserID", "tooluser_age",
+                                "n_pounds", "n_misstotal", "hammerswitches", "anvilswitches", "n_socatt", "n_disp", "n_scr", "p_total",
+                                "outcome", "displacement", "scrounging", "socialattention")]
+
+# some descriptives
+# how many of these sequences are split across various videos (so information missing)
+ftable(socatt_final$split[!duplicated(socatt_final$sequenceID)])
+table(socatt_final$socialattention[!duplicated(socatt_final$sequenceID)], 
+      socatt_final$split[!duplicated(socatt_final$sequenceID)])
+# how many sequences have unknown observers
+unique(socatt_final$videoID[which(socatt_final$observer_agesex == "unknown")])
+# what are outcomes depending on social attention yes/no
+table(socatt_final$socialattention[!duplicated(socatt_final$sequenceID)], 
+      socatt_final$outcome[!duplicated(socatt_final$sequenceID)])
+# unknown means that we do not know the ending because it is not on camera 
+# none could be unknown or another reason
+# either way, good to exclude these because we missed part of the sequence and 
+# therefore are not sure who was present/who paid attention
+
+# exclude these sequences
+socatt_final <- socatt_final[socatt_final$split == FALSE & !socatt_final$observer_agesex == "unknown" &
+                               !socatt_final$outcome == "None" & !socatt_final$outcome == "Unknown",]
+# then have 839 sequences
+length(unique(socatt_final$sequenceID))
+
+
+
+###
+### EFFICIENCY ####
+###
+
 ## Comparing efficiency between age classes on opened sequences, multiple measures
 ## Other factors that likely affect efficiency are:
 # The ripeness of the sea almond
@@ -127,7 +249,7 @@ round(exp(2.99),2)
 hypothesis(m_e1, "Intercept  > Intercept + AgeSubadult", alpha = 0.05)
 hypothesis(m_e1, "Intercept  > Intercept + AgeAdult", alpha = 0.05)
 hypothesis(m_e1, "Intercept + AgeAdult  < Intercept + AgeSubadult", alpha = 0.05)
-hypothesis(m_e1, "Intercept < Intercept + itemalmendragreen", alpha = 0.05)
+hypothesis(m_e1, "Intercept + itemalmendragreen > Intercept", alpha = 0.05)
 
 # report(m_e1)
 
@@ -177,7 +299,7 @@ plot(testdist2.1)
 # Fixed effects: age, item, and anviltype
 # Random effects: subjectID
 m_e2 <- brm(n_pounds ~ Age + item + anviltype + (1|subjectID), data = detseq_oi, family = "poisson", 
-            iter = 2000, chain = 3, core = 3, save_pars = save_pars(all = TRUE), 
+            iter = 2000, chain = 2, core = 2, save_pars = save_pars(all = TRUE), 
             control = list(adapt_delta = 0.99), backend = "cmdstanr")
 # m_e2 <- add_criterion(m_e2, c("loo", "loo_R2", "bayes_R2"), reloo = TRUE, backend = "cmdstanr", ndraws = 2000) 
 
@@ -197,8 +319,10 @@ round(bayes_R2(m_e2),2) # 0.12
 
 # Interpretation
 round(exp(1.64),2)
-hypothesis(m_e1, "Intercept  < Intercept + itemalmendragreen", alpha = 0.05)
+hypothesis(m_e2, "Intercept + itemalmendrared > Intercept", alpha = 0.05)
 hypothesis(m_e2, "Intercept > Intercept + AgeAdult", alpha = 0.05)
+hypothesis(m_e2, "Intercept > Intercept + anviltypewood", alpha = 0.05)
+
 
 # Visualization
 m_type_pred2 <- m_e2 %>% 
@@ -232,6 +356,9 @@ ggplot(data = m_type_pred2, aes(x = item, y = .epred)) + geom_violin(aes(color =
                      axis.title = element_text(size = 14)) 
 
 # relationship between nr of pounds and sequence duration
+# colors for juvenile, subadult, adult
+cols <- viridis(3, option = "plasma", end = 0.8)
+
 # png("detailedtools/RDS/duration_pound.png", width = 8, height = 7, units = 'in', res = 300)
 ggplot(detseq_oi, aes(y = seqduration, x = n_pounds, color = Age, shape = Age)) + geom_point(size = 3, alpha = 0.3) + geom_smooth() + 
   scale_color_viridis_d(option = "plasma", end = 0.8) +
@@ -285,7 +412,7 @@ round(bayes_R2(m_e3a),2) # 0.16
 
 # Interpretation
 round(exp(-0.77-3.63),2) * 0.48
-hypothesis(m_e3a, "Intercept > Intercept + AgeAdult", alpha = 0.05)
+hypothesis(m_e3a, "Intercept > Intercept + AgeSubadult", alpha = 0.05)
 
 # make violin plot
 m_type_pred3 <- m_e3a %>% 
@@ -332,8 +459,11 @@ loo_R2(m_e3b) # 0.10
 round(bayes_R2(m_e3b),2) # 0.13
 
 # Interpretation
-round(exp(-1.08),2) * 0.40
+round(exp(-0.54),2) * 0.40
 hypothesis(m_e3b, "Intercept > Intercept + AgeAdult", alpha = 0.05)
+hypothesis(m_e3b, "Intercept > Intercept + anviltypewood", alpha = 0.05)
+hypothesis(m_e3b, "Intercept + itemalmendragreen > Intercept", alpha = 0.05)
+hypothesis(m_e3b, "Intercept  + itemalmendrared > Intercept", alpha = 0.05)
 
 # make violin plot
 m_type_pred3b <- m_e3b %>% 
@@ -353,64 +483,171 @@ ggplot(data = m_type_pred3b, aes(x = Age, y = .epred)) + geom_boxplot(aes(color 
   theme_bw() + theme(axis.text = element_text(size = 12),
                      axis.title = element_text(size = 14)) 
 
-## 3c: Losing hammer (hammerlost)
-ftable(detseq_oi$n_hloss, detseq_oi$item)
-# Model 3c: Number of hammer losses depending on age
-# subjectID as random effect
-## ZERO-INFLATED POISSON
-m_e3c <- brm(n_hloss ~ Age + (1|subjectID), data = detseq_oi, 
-             family = zero_inflated_poisson, iter = 2000, chain = 2, core = 2, 
-             save_pars = save_pars(all = TRUE), backend = "cmdstanr", 
-             control = list(adapt_delta = 0.99))
- m_e3c <- add_criterion(m_e3c, c("loo", "loo_R2", "bayes_R2"), reloo = TRUE, backend = "cmdstanr", ndraws = 2000) 
+##### 4. Number of repositions ######
+
+## 4a: repositions of item
+
+### Model_4a ### 
+# Outcome: number of repositions
+# Fixed effects: age, item, anviltype
+# Random effects: subjectID
+m_e4a <- brm(n_itemreposit ~ Age + item + anviltype + (1|subjectID), data = detseq_oi, family = "poisson", 
+             iter = 2000, chain = 2, core = 2, control = list(adapt_delta = 0.99),
+             save_pars = save_pars(all = TRUE), backend = "cmdstanr")
+# m_e4a <- add_criterion(m_e4a, c("loo", "loo_R2", "bayes_R2"), reloo = TRUE, backend = "cmdstanr", ndraws = 2000) 
 
 # saving and loading model
-# saveRDS(m_e3c, "detailedtools/RDS/m_e3c.rds")
-# m_e3c <- readRDS("detailedtools/RDS/m_e3c.rds")
+# saveRDS(m_e4a, "detailedtools/RDS/m_e4a.rds")
+# m_e4a <- readRDS("detailedtools/RDS/m_e4a.rds")
 
 # diagnostics
-summary(m_e3c)
-mcmc_plot(m_e3c)
-pp_check(m_e3c)
-plot(conditional_effects(m_e3c))
+summary(m_e4a)
+mcmc_plot(m_e4a)
+pp_check(m_e4a)
+plot(conditional_effects(m_e4a))
+
+loo(m_e4a) # all cases good
+round(loo_R2(m_e4a),2) # 0.15
+round(bayes_R2(m_e4a),2) # 0.17 
+
+# Interpretation
+round(exp(0.20),2)
+hypothesis(m_e4a, "Intercept > Intercept + AgeAdult", alpha = 0.05)
+hypothesis(m_e4a, "Intercept > Intercept + AgeSubadult", alpha = 0.05)
 
 # make violin plot
-m_type_pred3c <- m_e3c %>% 
+m_type_pred4 <- m_e4a %>% 
   epred_draws(newdata = tibble(Age = detseq_oi$Age,
                                item = detseq_oi$item,
                                anviltype = detseq_oi$anviltype,
                                subjectID = detseq_oi$subjectID))
 
-# age difference in hammer losses
-ggplot(data = m_type_pred3c, aes(x = Age, y = .epred)) + geom_boxplot(aes(color = Age, fill = Age), alpha = 0.4) +
-  stat_summary(detseq_oi, inherit.aes = FALSE, mapping=aes(x = Age, y = n_hloss, color = Age), geom = "point", fun = "mean",
+# age difference in number of item repositions
+ggplot(data = m_type_pred4, aes(x = Age, y = .epred)) + geom_violin(aes(color = Age, fill = Age), alpha = 0.4) +
+  stat_summary(detseq_oi, inherit.aes = FALSE, mapping=aes(x = Age, y = n_itemreposit, color = Age), geom = "point", fun = "mean",
                size = 4) +
   scale_fill_viridis_d(option = "plasma", end = 0.8) +
   scale_color_viridis_d(option = "plasma", end = 0.8) +
   guides(color = "none", fill = "none") +
-  labs(x = "Age", y = "Average number of hammer losses per tool use sequence") +
+  labs(x = "Age", y = "Average number of repositions per sequence") +
   theme_bw() + theme(axis.text = element_text(size = 12),
                      axis.title = element_text(size = 14)) 
 
-## 3d: all mistakes together
+## 4b: peeling
 
-# Model 3d: Number of hammer losses depending on age, item, anviltype and subjectID as random effect
-## ZERO-INFLATED POISSON
-m_e3d <- brm(n_misstotal ~ Age + item + anviltype + (1|subjectID), data = detseq_oi, 
-             family = zero_inflated_poisson, iter = 2000, chain = 2, core = 2, 
-             save_pars = save_pars(all = TRUE), backend = "cmdstanr", 
-             control = list(adapt_delta = 0.99))
-# m_e3d <- add_criterion(m_e3d, c("loo", "loo_R2", "bayes_R2"), reloo = TRUE, backend = "cmdstanr", ndraws = 2000) 
+### Model_4b ### 
+# Outcome: number of peels
+# Fixed effects: age, item, anviltype
+# Random effects: subjectID
+m_e4b <- brm(n_peel ~ Age + item + anviltype + (1|subjectID), data = detseq_oi,
+             save_pars = save_pars(all = TRUE), family = "poisson", iter = 2000,
+             chain = 2, core = 2, backend = "cmdstanr")
+# m_e4b <- add_criterion(m_e4b, c("loo", "loo_R2", "bayes_R2"), reloo = TRUE, backend = "cmdstanr", ndraws = 2000) 
 
 # saving and loading model
-# saveRDS(m_e3d, "detailedtools/RDS/m_e3d.rds")
-# m_e3d <- readRDS("detailedtools/RDS/m_e3d.rds")
+# saveRDS(m_e4b, "detailedtools/RDS/m_e4b.rds")
+# m_e4b <- readRDS("detailedtools/RDS/m_e4b.rds")
 
+# diagnostics
+summary(m_e4b)
+mcmc_plot(m_e4b)
+pp_check(m_e4b)
+plot(conditional_effects(m_e4b))
 
+loo(m_e4b) # all cases good
+round(loo_R2(m_e4b),2) # 0.10
+round(bayes_R2(m_e4b),2) # 0.12 
 
+# Interpretation
+round(exp(0.35),2)
+hypothesis(m_e4b, "Intercept > Intercept + AgeSubadult", alpha = 0.05)
+hypothesis(m_e4b, "Intercept + itemalmendragreen > Intercept", alpha = 0.05)
 
-# individual variation in how many mistakes are made
-# only take individuals with enough sequences observed
+# make violin plot
+m_type_pred4b <- m_e4b %>% 
+  epred_draws(newdata = tibble(Age = detseq_oi$Age,
+                               item = detseq_oi$item,
+                               anviltype = detseq_oi$anviltype,
+                               subjectID = detseq_oi$subjectID))
+
+# age difference in number of peels
+ggplot(data = m_type_pred4b, aes(x = Age, y = .epred)) + geom_violin(aes(color = Age, fill = Age), alpha = 0.4) +
+  stat_summary(detseq_oi, inherit.aes = FALSE, mapping=aes(x = Age, y = n_peel, color = Age), geom = "point", fun = "mean",
+               size = 4) +
+  scale_fill_viridis_d(option = "plasma", end = 0.8) +
+  scale_color_viridis_d(option = "plasma", end = 0.8) +
+  guides(color = "none", fill = "none") +
+  labs(x = "Age", y = "Average number of peels per sequence") +
+  theme_bw() + theme(axis.text = element_text(size = 12),
+                     axis.title = element_text(size = 14)) 
+
+head(m_type_pred4b)
+head(m_type_pred)
+
+##### Visualizations ####
+# combine dataframes
+m_type_predtotal <- m_type_pred
+m_type_predtotal$.epred_pound <- m_type_pred2$.epred
+m_type_predtotal$.epred_misstrike <- m_type_pred3$.epred
+m_type_predtotal$.epred_itemflies <- m_type_pred3b$.epred
+m_type_predtotal$.epred_reposition <- m_type_pred4$.epred
+m_type_predtotal$.epred_peel <- m_type_pred4b$.epred
+
+## pounds, repositions and peels
+m_type_predtotal1 <- melt(m_type_predtotal[,c("item", "Age", "anviltype", "subjectID",
+                                         ".epred_pound", ".epred_reposition", ".epred_peel")], 
+                          measure.vars = c(".epred_pound", ".epred_reposition", ".epred_peel"))
+
+# colors for pound, reposit, peel
+cols_a <- viridis(4, option = "viridis", end = 0.8)
+
+# png("detailedtools/RDS/poundrepositpeel.png", width = 8, height = 7, units = 'in', res = 300)
+ggplot(data = m_type_predtotal1, aes(x = Age)) + 
+  geom_violin(aes(x = Age, y = value, col = variable, fill = variable), alpha = 0.4) +
+  stat_summary(detseq_oi, inherit.aes = FALSE, 
+               mapping=aes(x = as.numeric(Age) -0.3, y = n_pounds), col = cols_a[1], 
+               geom = "point", fun = "mean", size = 3)+
+  stat_summary(detseq_oi, inherit.aes = FALSE, mapping=aes(x = Age, y = n_itemreposit), 
+               col = cols_a[2], geom = "point", fun = "mean",size = 3) +   
+  stat_summary(detseq_oi, inherit.aes = FALSE, mapping=aes(x = as.numeric(Age) +0.3, y = n_peel), 
+               col =  cols_a[3], geom = "point", fun = "mean", size = 3) +
+  scale_fill_viridis_d(option = "viridis", end = 0.8, labels = c("pounds", "repositions", "peels")) +
+  scale_color_viridis_d(option = "viridis", end = 0.8) +
+  guides(fill = guide_legend("Type"), color = "none") +
+  labs(x = "Age", y = "Average number per sequence") +
+  theme_bw() + theme(axis.text = element_text(size = 12),
+                     axis.title = element_text(size = 14)) 
+#dev.off()  
+
+## mistrikes and item flies
+m_type_predtotal2 <- melt(m_type_predtotal[,c("item", "Age", "anviltype", "subjectID",
+                                              ".epred_misstrike", ".epred_itemflies")], 
+                          measure.vars = c(".epred_misstrike", ".epred_itemflies"))
+
+cols2 <- viridis(2, option = "inferno", end = 0.8)
+
+# png("detailedtools/RDS/mistakes.png", width = 8, height = 7, units = 'in', res = 300)
+ggplot(data = m_type_predtotal2, aes(x = Age)) + 
+  geom_violin(aes(x = Age, y = value, col = variable, fill = variable), alpha = 0.4) +
+  stat_summary(detseq_oi, inherit.aes = FALSE, 
+               mapping=aes(x = as.numeric(Age) -0.25, y = n_miss), col = cols2[1], 
+               geom = "point", fun = "mean", size = 3)+
+  stat_summary(detseq_oi, inherit.aes = FALSE, mapping=aes(x = as.numeric(Age) +0.25, y = n_flies), 
+               col = cols2[2], geom = "point", fun = "mean",size = 3) +   
+  scale_fill_viridis_d(option = "inferno", end = 0.8, labels = c("misstrikes", "item flies")) +
+  scale_color_viridis_d(option = "inferno", end = 0.8) +
+  guides(fill = guide_legend("Type"), color = "none") +
+  labs(x = "Age", y = "Average number per sequence") +
+  theme_bw() + theme(axis.text = element_text(size = 12),
+                     axis.title = element_text(size = 14)) + ylim(0,2)
+#dev.off()
+
+##
+### INDIVIDUAL VARIATION & DEVELOPMENT ####
+##
+
+##### Individual variation ######
+# filter to individuals with enough data
 ftable(detseq_oi$subjectID)
 knownids <- data.frame(ID = c("TER", "SPT", "BAL", "TOM", "PEA", "SMG", "ZIM", "MIC", "LAR"))
 for (i in 1:nrow(knownids)) {
@@ -419,14 +656,19 @@ for (i in 1:nrow(knownids)) {
 
 detseq_o2 <- left_join(detseq_o[which(detseq_o$subjectID %in% knownids$ID),], knownids, by = c("subjectID" = "ID"))
 
-ggplot(detseq_o2, aes(x=subjectID, y=n_misstotal, color = Age, fill = Age)) + 
-  geom_violin(alpha = 0.4) + geom_text(aes(y = 7.5, x = subjectID, label = nrow)) +
+# make subjectID factor that is ordered based on age
+detseq_o2$subjectID <- factor(detseq_o2$subjectID, levels = c("ZIM", "PEA", "BAL", "TER", "MIC", "LAR", "SPT", "TOM", "SMG"))
+
+# number of repositions
+ggplot(detseq_o2, aes(x=subjectID, y=n_reposit, color = Age, fill = Age)) + 
+  geom_violin(alpha = 0.4) + geom_text(aes(y = 9.5, x = subjectID, label = nrow)) +
   scale_fill_viridis_d(option = "plasma", end = 0.8) +
   scale_color_viridis_d(option = "plasma", end = 0.8) +
-  labs(x = "Age", y = "Average number of mistakes per tool use sequence") +
+  labs(x = "Age", y = "Average number of repositions per tool use sequence") +
   theme_bw() + theme(axis.text = element_text(size = 12),
                      axis.title = element_text(size = 14)) 
 
+# individual variation in how many mistakes are made
 ggplot(detseq_o2, aes(x=subjectID, y=n_flies, color = Age, fill = Age)) + 
   geom_violin(alpha = 0.4) + geom_text(aes(y = 7.5, x = subjectID, label = nrow)) +
   scale_fill_viridis_d(option = "plasma", end = 0.8) +
@@ -451,163 +693,8 @@ ggplot(detseq_o2, aes(x=subjectID, y=n_miss, color = Age, fill = Age)) +
   theme_bw() + theme(axis.text = element_text(size = 12),
                      axis.title = element_text(size = 14)) 
 
-
-#### 4. Number of repositions #####
-
-## 4a: repositions of item
-# Model 4a: Number of repositions depending on age, item, anviltype and subject ID as random effect
-m_e4a <- brm(n_itemreposit ~ Age + item*anviltype + (1|subjectID), data = detseq_oi, family = "poisson", 
-             iter = 1000, chain = 2, core = 2, save_pars = save_pars(all = TRUE), backend = "cmdstanr")
-# saving and loading model
-# saveRDS(m_e4a, "detailedtools/RDS/m_e4a.rds")
-# m_e4a <- readRDS("detailedtools/RDS/m_e4a.rds")
-
-# diagnostics
-summary(m_e4a)
-mcmc_plot(m_e4a)
-pp_check(m_e4a)
-plot(conditional_effects(m_e4a))
-
-# make violin plot
-m_type_pred4 <- m_e4a %>% 
-  epred_draws(newdata = tibble(Age = detseq_oi$Age,
-                               item = detseq_oi$item,
-                               anviltype = detseq_oi$anviltype,
-                               subjectID = detseq_oi$subjectID))
-
-# age difference in number of item repositions
-ggplot(data = m_type_pred4, aes(x = Age, y = .epred)) + geom_violin(aes(color = Age, fill = Age), alpha = 0.4) +
-  stat_summary(detseq_o, inherit.aes = FALSE, mapping=aes(x = Age, y = n_itemreposit, color = Age), geom = "point", fun = "mean",
-               size = 4) +
-  scale_fill_viridis_d(option = "plasma", end = 0.8) +
-  scale_color_viridis_d(option = "plasma", end = 0.8) +
-  guides(color = "none", fill = "none") +
-  labs(x = "Age", y = "Average number of repositions per sequence") +
-  theme_bw() + theme(axis.text = element_text(size = 12),
-                     axis.title = element_text(size = 14)) 
-
-## 4b: repositions of hammers
-# Model 4b: Number of hammer repositions depending on age, item, anviltype and subject ID as random effect
-m_e4b <- brm(n_hamreposit ~ Age + item*anviltype + (1|subjectID), data = detseq_oi, family = "poisson", iter = 1000, chain = 2, core = 2, backend = "cmdstanr")
-# saving and loading model
-# saveRDS(m_e4b, "detailedtools/RDS/m_e4b.rds")
-# readRDS("detailedtools/RDS/m_e4b.rds")
-
-# diagnostics
-summary(m_e4b)
-mcmc_plot(m_e4b)
-pp_check(m_e4b)
-plot(conditional_effects(m_e4b))
-
-# make violin plot
-m_type_pred4b <- m_e4b %>% 
-  epred_draws(newdata = tibble(Age = detseq_oi$Age,
-                               item = detseq_oi$item,
-                               anviltype = detseq_oi$anviltype,
-                               subjectID = detseq_oi$subjectID))
-
-# age difference in number of hammer repositions
-ggplot(data = m_type_pred4b, aes(x = Age, y = .epred)) + geom_violin(aes(color = Age, fill = Age), alpha = 0.4) +
-  stat_summary(detseq_oi, inherit.aes = FALSE, mapping=aes(x = Age, y = n_hamreposit, color = Age), geom = "point", fun = "mean",
-               size = 4) +
-  scale_fill_viridis_d(option = "plasma", end = 0.8) +
-  scale_color_viridis_d(option = "plasma", end = 0.8) +
-  guides(color = "none", fill = "none") +
-  labs(x = "Age", y = "Average number of repositions per sequence") +
-  theme_bw() + theme(axis.text = element_text(size = 12),
-                     axis.title = element_text(size = 14)) 
-
-## 4c: peeling
-# Model 4c: Number of peels depending on age, item, anviltype and subject ID as random effect
-m_e4c <- brm(n_peel ~ Age + item*anviltype + (1|subjectID), data = detseq_oi,
-             save_pars = save_pars(all = TRUE), family = "poisson", iter = 1000, chain = 2, core = 2, backend = "cmdstanr")
-# saving and loading model
-# saveRDS(m_e4c, "detailedtools/RDS/m_e4c.rds")
-# m_e4c <- readRDS("detailedtools/RDS/m_e4c.rds")
-
-# diagnostics
-summary(m_e4c)
-mcmc_plot(m_e4c)
-pp_check(m_e4c)
-plot(conditional_effects(m_e4c))
-
-# make violin plot
-m_type_pred4c <- m_e4c %>% 
-  epred_draws(newdata = tibble(Age = detseq_oi$Age,
-                               item = detseq_oi$item,
-                               anviltype = detseq_oi$anviltype,
-                               subjectID = detseq_oi$subjectID))
-
-# age difference in number of peels
-ggplot(data = m_type_pred4c, aes(x = Age, y = .epred)) + geom_violin(aes(color = Age, fill = Age), alpha = 0.4) +
-  stat_summary(detseq_o, inherit.aes = FALSE, mapping=aes(x = Age, y = n_itemreposit, color = Age), geom = "point", fun = "mean",
-               size = 4) +
-  scale_fill_viridis_d(option = "plasma", end = 0.8) +
-  scale_color_viridis_d(option = "plasma", end = 0.8) +
-  guides(color = "none", fill = "none") +
-  labs(x = "Age", y = "Average number of peels per sequence") +
-  theme_bw() + theme(axis.text = element_text(size = 12),
-                     axis.title = element_text(size = 14)) 
-
-
-# individual variation
-
-ggplot(detseq_o2, aes(x=subjectID, y=n_reposit, color = Age, fill = Age)) + 
-  geom_violin(alpha = 0.4) + geom_text(aes(y = 9.5, x = subjectID, label = nrow)) +
-  scale_fill_viridis_d(option = "plasma", end = 0.8) +
-  scale_color_viridis_d(option = "plasma", end = 0.8) +
-  labs(x = "Age", y = "Average number of repositions per tool use sequence") +
-  theme_bw() + theme(axis.text = element_text(size = 12),
-                     axis.title = element_text(size = 14)) 
-
-### Exploring individual variation and development ####
-
-# focus only on identifiable individuals who had more than 10 observations (so no Joe and Ink)
-detseq_o2c <- detseq_o2
-ftable(detseq_o2c$item)
-ftable(detseq_o2c$subjectID)
-# make subjectID factor that is ordered based on age
-detseq_o2c$subjectID <- factor(detseq_o2c$subjectID, levels = c("ZIM", "PEA", "BAL", "TER", "MIC", "LAR", "SPT", "TOM", "SMG"))
-
-## What items they process over time
-ggplot(detseq_o2c, aes(x = month(mediadate), fill = item)) + geom_histogram() + facet_wrap(~ subjectID) + theme_bw()
-
-# old plot showing change in n_pound, n_miss and n_reposit (but not accounting for itemtype)
-ggplot(detseq_o2c[detseq_o2c$location == "EXP-ANV-01",]) + geom_smooth(aes(x = mediadate, y = n_miss, color = "n_miss")) + geom_smooth(aes(x = mediadate, y = n_pounds, color = "n_pounds")) + ylim(0,15) +
-  geom_smooth(aes(x = mediadate, y = n_itemreposit,  color = "n_repositions"))  + facet_wrap(~subjectID)  + theme_bw() + scale_color_manual("", breaks = c("n_miss", "n_pounds", "n_repositions"),
-                                                                                                                                                       values = c("red", "blue", "green"))
-
-# how n_pounds changes over time, but ideally staying within each itemtype.
-ggplot(detseq_o2c[detseq_o2c$item == c("almendrabrown"),]) + geom_point(aes(x = mediadate, y = n_pounds, shape = location), alpha = 0.4, color = "brown", size = 3) + geom_smooth(aes(x = mediadate, y = n_pounds), color = "brown") + 
-  facet_wrap(~subjectID) + theme_bw() + ggtitle("Brown Almendra") + labs(x = "Date", y = "Number of pounds to open item") +theme(axis.text = element_text(size = 12),
-                                                                                  axis.title = element_text(size = 14)) 
-
-ggplot(detseq_o2c[detseq_o2c$item == c("almendragreen"),]) + geom_point(aes(x = mediadate, y = n_pounds, shape = location), alpha = 0.4, color = "darkgreen", size = 3) + geom_smooth(aes(x = mediadate, y = n_pounds), color = "darkgreen") + 
-  facet_wrap(~subjectID) + theme_bw() + ggtitle("Green Almendra") + labs(x = "Date", y = "Number of pounds to open item") +theme(axis.text = element_text(size = 12),
-                                                                                                                                 axis.title = element_text(size = 14)) 
-
-# how misstrikes (real misses) change over time, within each itemtype
-ggplot(detseq_o2c[detseq_o2c$item == c("almendrabrown"),]) + geom_point(aes(x = mediadate, y = n_miss, shape = location), alpha = 0.4, color = "brown", size = 3) + geom_smooth(aes(x = mediadate, y = n_miss), color = "brown") + 
-  facet_wrap(~subjectID) + theme_bw() + ggtitle("Brown Almendra") + labs(x = "Date", y = "Number of mistakes") +theme(axis.text = element_text(size = 12),
-                                                                                                                                 axis.title = element_text(size = 14)) + ylim(c(0,10))
-
-# how itemrepositions change over time
-ggplot(detseq_o2c[detseq_o2c$item == c("almendrabrown"),]) + geom_point(aes(x = mediadate, y = n_itemreposit, shape = location), alpha = 0.4, color = "brown", size = 3) + geom_smooth(aes(x = mediadate, y = n_itemreposit), color = "brown") + 
-  facet_wrap(~subjectID) + theme_bw() + ggtitle("Brown Almendra") + labs(x = "Date", y = "Number of repositions per sequence") +theme(axis.text = element_text(size = 12),
-                                                                                                                      axis.title = element_text(size = 14)) + ylim(c(0,10))
-
-# combining n_pounds and n_repositions
-ggplot(detseq_o2c[detseq_o2c$item == c("almendrabrown"),]) + geom_point(aes(x = mediadate, y = n_pounds, color = "Pounds"), shape = 16, alpha = 0.4, size = 3) + 
-  geom_point(aes(x = mediadate, y = n_itemreposit, color = "Item repositions"), shape = 17, alpha = 0.4, size = 3) + geom_smooth(aes(x = mediadate, y = n_pounds, color = "Pounds")) +  
-  geom_smooth(aes(x = mediadate, y = n_itemreposit, color = "Item repositions")) + 
-  geom_point(aes(x = mediadate, y = n_miss, color = "Misses"), shape = 18, alpha = 0.4, size = 3) + geom_smooth(aes(x = mediadate, y = n_pounds, color = "Pounds")) +  
-  geom_smooth(aes(x = mediadate, y = n_miss, color = "Misses")) +
-  facet_wrap(~subjectID, scales = "free_y") + theme_bw() + ggtitle("Brown Almendra") + scale_color_manual("", breaks = c("Pounds", "Misses", "Item repositions"),
-                                                                                                          values = c("blue", "darkred", "darkgreen")) +
-  labs(x = "Date", y = "Number per sequence") +theme(axis.text = element_text(size = 12),  axis.title = element_text(size = 14)) 
-
 # comparing n_pounds, n_miss, n_reposit for known individuals
-melt_detseq <- melt(detseq_o2c, measure.vars = c("n_pounds", "n_misstotal", "n_itemreposit"))
+melt_detseq <- melt(detseq_o2, measure.vars = c("n_pounds", "n_misstotal", "n_itemreposit"))
 
 ggplot(melt_detseq) + geom_violin(aes(y = value, x = variable, color = variable, fill = variable), alpha = 0.4) +
   stat_summary(melt_detseq, inherit.aes = FALSE, mapping=aes(x = variable, y = value, color = variable), geom = "point", fun = "mean",
@@ -619,53 +706,130 @@ ggplot(melt_detseq) + geom_violin(aes(y = value, x = variable, color = variable,
   theme_bw() + theme(axis.text = element_text(size = 12),
                      axis.title = element_text(size = 14)) 
 
+## What items they process over time
+ggplot(detseq_o2, aes(x = month(mediadate), fill = item)) + geom_histogram() + facet_wrap(~ subjectID) + theme_bw()
 
-# would probably have to be some kind of GAM, that also includes other things that affects these things (item, anviltype)
-# either work with actual number or do maybe a julian day or something? and then split by ID? 
-detseq_o2c$time <- as.numeric(difftime(detseq_o2c$mediadate, min(detseq_o2c$mediadate), unit = "days"))
-head(detseq_o2c$time)
-detseq_o2c$subjectID_F <- as.factor(detseq_o2c$subjectID)
-detseq_o2c$Age_f <- as.factor(detseq_o2c$Age)
+##### Development ######
 
-str(detseq_o2c)
-dev_gam1 <- gam(n_pounds ~ s(time, by = Age_f) + Age_f + s(subjectID_F, bs = "re"), data = detseq_o2c[detseq_o2c$item == "almendrabrown",], family = "poisson", method = "REML")
+# First just visualizing how number of pounds/repositions/mistakes change over time
+
+# how n_pounds changes over time, only for brown almendras
+ggplot(detseq_o2[detseq_o2$item == c("almendrabrown"),]) + geom_point(aes(x = mediadate, y = n_pounds, shape = location), alpha = 0.4, color = "brown", size = 3) + geom_smooth(aes(x = mediadate, y = n_pounds), color = "brown") + 
+  facet_wrap(~subjectID) + theme_bw() + ggtitle("Brown Almendra") + labs(x = "Date", y = "Number of pounds to open item") +theme(axis.text = element_text(size = 12),
+                                                                                  axis.title = element_text(size = 14)) 
+# n_pounds for green almendras
+ggplot(detseq_o2[detseq_o2$item == c("almendragreen"),]) + geom_point(aes(x = mediadate, y = n_pounds, shape = location), alpha = 0.4, color = "darkgreen", size = 3) + geom_smooth(aes(x = mediadate, y = n_pounds), color = "darkgreen") + 
+  facet_wrap(~subjectID) + theme_bw() + ggtitle("Green Almendra") + labs(x = "Date", y = "Number of pounds to open item") +theme(axis.text = element_text(size = 12),
+                                                                                                                                 axis.title = element_text(size = 14)) 
+# how misstrikes (real misses) change over time, brown almendras
+ggplot(detseq_o2[detseq_o2$item == c("almendrabrown"),]) + geom_point(aes(x = mediadate, y = n_miss, shape = location), alpha = 0.4, color = "brown", size = 3) + geom_smooth(aes(x = mediadate, y = n_miss), color = "brown") + 
+  facet_wrap(~subjectID) + theme_bw() + ggtitle("Brown Almendra") + labs(x = "Date", y = "Number of mistakes") +theme(axis.text = element_text(size = 12),
+                                                                                                                                axis.title = element_text(size = 14)) + ylim(c(0,10))
+# how itemrepositions change over time
+ggplot(detseq_o2[detseq_o2$item == c("almendrabrown"),]) + geom_point(aes(x = mediadate, y = n_itemreposit, shape = location), alpha = 0.4, color = "brown", size = 3) + geom_smooth(aes(x = mediadate, y = n_itemreposit), color = "brown") + 
+  facet_wrap(~subjectID) + theme_bw() + ggtitle("Brown Almendra") + labs(x = "Date", y = "Number of repositions per sequence") +theme(axis.text = element_text(size = 12),                                                                                                                  axis.title = element_text(size = 14)) + ylim(c(0,10))
+
+# combining n_pounds, n_miss and n_repositions for brown almendras
+# png("detailedtools/RDS/eff_dev.png", width = 9, height = 7, units = 'in', res = 300)
+ggplot(detseq_o2[detseq_o2$item == c("almendrabrown"),]) + 
+  geom_point(aes(x = mediadate, y = n_pounds, color = "Pounds", shape = location), alpha = 0.2, size = 2) + 
+  geom_point(aes(x = mediadate, y = n_itemreposit, color = "Repositions", shape = location), alpha = 0.2, size = 2) + 
+  geom_smooth(aes(x = mediadate, y = n_pounds, color = "Pounds")) +  
+  geom_smooth(aes(x = mediadate, y = n_itemreposit, color = "Repositions")) + 
+  geom_point(aes(x = mediadate, y = n_miss, color = "Misses", shape = location), alpha = 0.2, size = 3) + 
+  geom_smooth(aes(x = mediadate, y = n_pounds, color = "Pounds")) +  
+  geom_smooth(aes(x = mediadate, y = n_miss, color = "Misses")) + theme_bw() +
+  theme(legend.position = "top", legend.title = element_blank()) +
+  facet_wrap2(.~subjectID, nrow = 3, ncol = 3,
+              strip = strip_themed(
+                background_x = list(element_rect(fill = cols[1]),
+                                    element_rect(fill = cols[1]),
+                                    element_rect(fill = cols[1]),
+                                    element_rect(fill = cols[1]),
+                                    element_rect(fill = cols[2]),
+                                    element_rect(fill = cols[2]),
+                                    element_rect(fill = cols[2]),
+                                    element_rect(fill = cols[3]),
+                                    element_rect(fill = cols[3])))) + 
+  theme(strip.text = element_text(colour = 'white')) +
+  scale_color_manual("", breaks = c("Pounds", "Misses", "Repositions"), values = c(cols_a[1], cols_a[4], cols_a[2])) +
+  scale_x_datetime(labels = date_format("%b")) +
+  labs(x = "Date", y = "Number per sequence") +theme(axis.text = element_text(size = 12),  axis.title = element_text(size = 14)) 
+# dev.off()
+
+###### GAMs of tool use development ######
+detseq_o2$time <- as.numeric(difftime(detseq_o2$mediadate, min(detseq_o2$mediadate), unit = "days"))
+head(detseq_o2$time)
+detseq_o2$subjectID_F <- as.factor(detseq_o2$subjectID)
+detseq_o2$Age_f <- as.factor(detseq_o2$Age)
+
+## Model dev_gam1 ##
+# outcome: n_pounds
+# fixed effects: time (days since start of deployment), with a curve for each age class
+# random effect of subjectID
+
+# MGCV
+dev_gam1 <- gam(n_pounds ~ s(time, by = Age_f) + Age_f + s(subjectID_F, bs = "re"), 
+                data = detseq_o2[detseq_o2$item == "almendrabrown",], family = "poisson", method = "REML")
 summary(dev_gam1)
 draw(dev_gam1)
 plot(dev_gam1)
 
-# in brms (trial)
-dev_gam1b <- brm(n_pounds ~ s(time, by = Age_f) + Age_f + s(subjectID_F, bs = "re"), data=detseq_o2c[detseq_o2c$item == "almendrabrown",], family="poisson", 
+# BRMS
+dev_gam1b <- brm(n_pounds ~ s(time, by = Age_f) + Age_f + s(subjectID_F, bs = "re"), 
+                 data=detseq_o2[detseq_o2$item == "almendrabrown",], family="poisson", 
                chains=2, cores = 2, backend = "cmdstanr", save_pars = save_pars(all = TRUE),
-               iter = 1000)
+               iter = 2000)
+# dev_gam1b <- add_criterion(dev_gam1b, c("loo", "loo_R2", "bayes_R2"), reloo = TRUE, backend = "cmdstanr", ndraws = 2000) 
+
 # saving and loading model
 # saveRDS(dev_gam1b, "detailedtools/RDS/dev_gam1b.rds")
 # dev_gam1b <- readRDS("detailedtools/RDS/dev_gam1b.rds")
 plot(conditional_smooths(dev_gam1b))
 plot(conditional_effects(dev_gam1b))
 
-dev_gam2b <- brm(n_pounds ~ s(time, by = subjectID_F) + subjectID_F + Age_f, data=detseq_o2c[detseq_o2c$item == "almendrabrown",], family="poisson", 
+## BRMS linear
+dev_m1 <- brm(n_pounds ~ time*subjectID_F, data=detseq_o2[detseq_o2$item == "almendrabrown",], family="poisson", 
+              chains=2, cores = 2, backend = "cmdstanr", save_pars = save_pars(all = TRUE),
+              iter = 2000)
+# dev_m1 <- add_criterion(dev_m1, c("loo", "loo_R2", "bayes_R2"), reloo = TRUE, backend = "cmdstanr", ndraws = 2000) 
+
+# saving and loading model
+# saveRDS(dev_m1, "detailedtools/RDS/dev_m1.rds")
+# dev_m1 <- readRDS("detailedtools/RDS/dev_m1.rds")
+summary(dev_m1)
+
+## Model dev_gam2 ##
+# outcome: n_pounds
+# fixed effects: time (days since start of deployment), with a curve for each individual
+
+# MGCV
+dev_gam2 <- gam(n_pounds ~ s(time, by = subjectID_F) + subjectID_F, 
+                data = detseq_o2[detseq_o2$item == "almendrabrown",], family = "poisson", method = "REML")
+summary(dev_gam2)
+draw(dev_gam2)
+plot(dev_gam2)
+
+# BRMS
+dev_gam2b <- brm(n_pounds ~ s(time, by = subjectID_F) + subjectID_F, data=detseq_o2[detseq_o2$item == "almendrabrown",], family="poisson", 
                  chains=2, cores = 2, backend = "cmdstanr", save_pars = save_pars(all = TRUE),
-                 iter = 1000)
+                 iter = 2000)
+# dev_gam2b <- add_criterion(dev_gam2b, c("loo", "loo_R2", "bayes_R2"), reloo = TRUE, backend = "cmdstanr", ndraws = 2000) 
+
 # saving and loading model
 # saveRDS(dev_gam2b, "detailedtools/RDS/dev_gam2b.rds")
 # dev_gam2b <- readRDS("detailedtools/RDS/dev_gam2b.rds")
 plot(conditional_smooths(dev_gam2b))
-plot(conditional_effects(dev_gam1b))
+plot(conditional_effects(dev_gam2b))
 
-### What is ABE doing? ###
+###### Old age cut-off? ######
 # do we see ABE use tools at all in this dataset?
-head(dettools_r2)
-head(detseq)
 ftable(detseq$subjectID)
-# we don't see ABE use tools in this dataset at all (INK also does it much less...)
+# we don't see ABE use tools in this dataset at all
 
-# sidenote: does ABE use tools in agouti data? 
-head(agoutisequence_c)
-str(agoutisequence_c)
-ftable(agoutisequence_c$name)
-# make abe subset
+# does ABE use tools in old data? 
 ABE_only <- subset(agouticlean, agouticlean$name == "ABE (Abraham)")
-ftable(ABE_only$tooluse)
+ftable(ABE_only$tooluse) # 73 instances of tool use
 plot(ABE_only$seq_start, ABE_only$tooluse)
 
 # do we see ABE displace/scrounge? 
@@ -682,105 +846,9 @@ ftable(detseq$displacement)
 ftable(displacements[!duplicated(displacements$sequenceID),]$scrounging)
 ftable(detseq$scrounging)
 
-### Social Attention ####
-## for coding
-# ones I coded
-socatt_vidnames <- soc_att[,c("videoID", "coder", "subjectID", "attention", "scrounging", "displacement")]
-# filter to ones not coded yet
-# load in coding
-socatt_c <- read.csv("detailedtools/socialattentioncoding.csv")
-tocode <- socatt_vidnames[!socatt_vidnames$videoID %in% socatt_c$Observation.id,]
-tocode[0:nrow(tocode),]
-
-## first look at the detailed social attention coding
-head(socatt_seq)
-head(socatt_ct)
-
-# my first hunch says to use the socatt_ct, filtered just to presence
-head(socatt_ct)
-# add variable whether there is social attention in the sequence
-socsequences <- unique(socatt_ct$sequenceID[which(socatt_ct$behavior == "socialattention")])
-socatt_ct$socatt <- ifelse(socatt_ct$sequenceID %in% socsequences, 1, 0)
-socatt_cts <- socatt_ct[socatt_ct$behavior == "socialattention",]
-
-#make dataframe with already all presence without social attention
-socatt_final <- socatt_ct[socatt_ct$behavior == "present" & socatt_ct$socatt == 0,]
-
-# work on the sequence level
-for(i in 1:length(socsequences)){
-  observers <- socatt_cts$subjectID[which(socatt_cts$sequenceID == socsequences[i])]
-  seq_present <- socatt_ct[socatt_ct$sequenceID == socsequences[i] & socatt_ct$behavior == "present",]
-  # set all socatt to 0 except for the individual paying social attention 
-  seq_present$socatt <- 0
-  #easiest to match for each observer
-  # for first observer, just take first line with matching presence 
-  # (e.g. if there are multiple juveniles just take the first, and make it a 1)
-  seq_present$socatt[which(seq_present$subjectID == observers[1])][1] <- 1
-  if(length(observers) > 1) {
-    # to avoid making the same one 1 again, subset to those still 0
-    seq_present$socatt[which(seq_present$subjectID == observers[2] & seq_present$socatt == 0)][1] <- 1
-  }
-  if(length(observers) > 2) {
-    seq_present$socatt[which(seq_present$subjectID == observers[3] & seq_present$socatt == 0)][1] <- 1
-  }
-socatt_final <- rbind(socatt_final, seq_present)
-}
-
-socatt_final <- socatt_final[order(socatt_final$sequenceID),]
-# in this sample, we have:
-length(unique(socatt_final$sequenceID))
-# 990 sequences with capuchins present
-# now attach the relevant information from the main dataframe (information on the tool user etc)
-head(detseq)
-
-socatt_final <- left_join(socatt_final, detseq[,c("sequenceID", "subjectID", "coder", "location", "item",
-                                                    "outcome", "displacement", "scrounging",
-                                                   "anviltype", "seqduration", "n_pounds", "n_misstotal",
-                                                   "Age", "deployment", "split", "hammerswitches", "anvilswitches")],
-                          by = "sequenceID")
-
-# also add more detailed information on number of capuchins present, number scrounging etc, from the social coding
-head(socatt_seq)
-socatt_final <- left_join(socatt_final, socatt_seq[,c("sequenceID", "n_socatt", "n_disp", "n_scr", "p_total")],
-                          by = "sequenceID")
-
-# clean up the final dataframe
-head(socatt_final)
-# subjectID.x = observer, coder.x = coder of social attention
-socatt_final$observerID <- socatt_final$subjectID.x
-socatt_final$tooluserID <- socatt_final$subjectID.y
-socatt_final$coder_socatt <- socatt_final$coder.x
-socatt_final$coder_tooluse <- socatt_final$coder.y
-socatt_final$observer_agesex <- ifelse(str_detect(socatt_final$agesex, "juvenile"), "juvenile", socatt_final$agesex)
-socatt_final$tooluser_age <- socatt_final$Age
-# variable for if there is social attention in sequence
-socatt_final$socialattention <- ifelse(socatt_final$sequenceID %in% socsequences, "socialattention", "nosocialattention")
-
-socatt_final <- socatt_final[,c("sequenceID", "videoID", "deployment", "location", "anviltype", "seqduration", "coder_socatt", 
-                                "coder_tooluse", "split", "item", "observerID", "observer_agesex", "socatt","tooluserID", "tooluser_age",
-                                 "n_pounds", "n_misstotal", "hammerswitches", "anvilswitches", "n_socatt", "n_disp", "n_scr", "p_total",
-                                "outcome", "displacement", "scrounging", "socialattention")]
-
-# some descriptives
-# how many of these sequences are split across various videos (so information missing)
-ftable(socatt_final$split[!duplicated(socatt_final$sequenceID)])
-table(socatt_final$socialattention[!duplicated(socatt_final$sequenceID)], 
-      socatt_final$split[!duplicated(socatt_final$sequenceID)])
-# how many sequences have unknown observers
-unique(socatt_final$videoID[which(socatt_final$observer_agesex == "unknown")])
-# what are outcomes depending on social attention yes/no
-table(socatt_final$socialattention[!duplicated(socatt_final$sequenceID)], 
-      socatt_final$outcome[!duplicated(socatt_final$sequenceID)])
-# unknown means that we do not know the ending because it is not on camera 
-# none could be unknown or another reason
-# either way, good to exclude these because we missed part of the sequence and 
-# therefore are not sure who was present/who paid attention
-
-# exclude these sequences
-socatt_final <- socatt_final[socatt_final$split == FALSE & !socatt_final$observer_agesex == "unknown" &
-                               !socatt_final$outcome == "None" & !socatt_final$outcome == "Unknown",]
-# then have 837 sequences
-length(unique(socatt_final$sequenceID))
+###
+### SOCIAL ATTENTION ####
+###
 
 # in how many sequences do we see social attention?
 ftable(socatt_final$socialattention[!duplicated(socatt_final$sequenceID)])
