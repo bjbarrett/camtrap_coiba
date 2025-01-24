@@ -874,6 +874,12 @@ socatt_final$observerID <- as.factor(socatt_final$observerID)
 socatt_final$item2 <- as.factor(socatt_final$item2)
 socatt_final$sequenceID <- as.factor(socatt_final$sequenceID)
 
+# get IDs of who pays social attention
+socialattentioners <- append(socatt_seq$socatt_ID1, socatt_seq$socatt_ID2)
+socialattentioners <- append(socialattentioners, socatt_seq$socatt_ID3)
+socialattentioners <- socialattentioners[!is.na(socialattentioners)]
+ftable(socialattentioners)
+
 ##### What predicts social attention? #####
 
 ### Model socatt_bm1 ###
@@ -925,8 +931,7 @@ toolusertitles <- c(`Juvenile` = "Juvenile tool user",
                     `Subadult` = "Subadult tool user",
                     `Adult` = "Adult tool user")
 
-
-# png("detailedtools/RDS/socatt_ages.png", width = 8, height = 7, units = 'in', res = 300)
+# png("detailedtools/RDS/socatt_ages.png", width = 8, height = 6, units = 'in', res = 300)
 ggplot(data = socatt_bm1_pred, aes(x = observer_agesex, y = .epred)) + geom_boxplot(aes(color = observer_agesex, fill = observer_agesex), alpha = 0.4,  outlier.color = NA) +
   stat_summary(socatt_final, inherit.aes = FALSE, mapping=aes(x = observer_agesex, y = socatt, color = observer_agesex), geom = "point", fun = "mean",
                size = 4) +
@@ -934,62 +939,54 @@ ggplot(data = socatt_bm1_pred, aes(x = observer_agesex, y = .epred)) + geom_boxp
   scale_color_manual(values = cols_obs) +
   guides(color = "none", fill = "none") +
   labs(x = "Age-sex class of observer", y = "Likelihood to pay social attention") + facet_wrap(~tooluser_age, labeller = as_labeller(toolusertitles)) +
-  theme_bw() + theme(axis.text = element_text(size = 12),
+  theme_bw() + theme(axis.text = element_text(size = 12), strip.text.x = element_text(size = 12),
                      axis.title = element_text(size = 14)) + theme(axis.text.x = element_text(angle =45, hjust = 1))
 # dev.off()
 
 # scrounging and total presence
-# do this by pulling out ggplot object of conditional effects and making the plot with points overlaid?
-# like we used to do for the tidal stuff? check that
+soc_present <- plot(conditional_effects(socatt_bm1), plot = FALSE)[[4]]
+soc_scr <- plot(conditional_effects(socatt_bm1), plot = FALSE)[[5]]
 
-ggplot() +geom_smooth(data = socatt_bm1_pred, aes(x = p_total, y = .epred, col = "Present"), method = "loess") + 
-  geom_point(socatt_final, inherit.aes = FALSE, mapping=aes(x = p_total, y = socatt, color = "Present"), geom = "point", alpha = 0.2, size = 3) +
-  geom_smooth(data = socatt_bm1_pred, aes(x = n_scr, y = .epred, col = "Scrounging"), method = "loess") +   
-  geom_point(socatt_final, inherit.aes = FALSE, mapping=aes(x = n_scr, y = socatt, color = "Scrounging"), geom = "point", alpha = 0.2, size = 3) +
+presentplot <- data.frame(p_total = c(1,2,3,4,5,6,7))
+scrplot <- data.frame(n_scr = c(1,2,3,4,5))
 
+scrplot$socatt <- aggregate(socatt_final[, c("socatt")], list(socatt_final$n_scr), mean)[2]$x
+scrplot$sizescrounge <- aggregate(socatt_final[, c("socatt")], list(socatt_final$n_scr), length)[2]$x
+presentplot$socatt <- aggregate(socatt_final[, c("socatt")], list(socatt_final$p_total), mean)[2]$x
+presentplot$sizepresent <- aggregate(socatt_final[, c("socatt")], list(socatt_final$p_total), length)[2]$x
 
-# STILL SOME KIND OF VISUALIZATION OF WHICH SPECIFIC INDIVIDUALS MOSTLY HAD SOCIAL ATTENTION
-  # ALSO TRY TO SOMEHOW CAPTURE/EXPLAIN THE KNOWN VS UNKNOWN JUVENILES
-  # AND STILL DO MODEL ON WHETHER EFFICIENT TOOL USERS ATTRACT MORE SOCIAL ATTENTION (CAN PROB USE THAT OUTPUT FOR THE INDIVIDUALS)
+# png("detailedtools/RDS/socatt_scrpre.png", width = 8, height = 6, units = 'in', res = 300)
+soc_present  + theme_bw() +
+  stat_summary(data = presentplot, inherit.aes = FALSE, aes(x = p_total, y = socatt, fill = sizepresent), 
+  geom = "point", fun = "mean", size = 3, shape = 24, alpha = 0.5) + scale_fill_viridis(limits = c(0,1000)) + 
+  labs(x = "Individuals present", y = "Likelihood of social attention") + guides(fill = "none") +
+  theme(axis.title = element_text(size = 14),  axis.text = element_text(size = 12)) +
+  soc_scr + theme_bw() +   scale_fill_viridis(limits = c(0, 1000)) +
+  stat_summary(data = scrplot, inherit.aes = FALSE, aes(x = n_scr, y = socatt, fill = sizescrounge), 
+  geom = "point", fun = "mean", size = 3, shape = 24, alpha = 0.5) + labs(y = NULL, x = "Individuals scrounging", fill = "Sample size") +
+  theme(legend.text =  element_text(size = 12), 
+        legend.title = element_text(size =14),axis.title = element_text(size = 14), axis.text = element_text(size = 12))
+#dev.off()  
 
+##### Social attention to efficient tool users #####
 
-## alternatively, differentiate known and unknown juveniles (so known tool users, and likely not tool users)
-socatt_final$observer_agesex2 <- socatt_final$observer_agesex
-socatt_final$observer_agesex2[which(socatt_final$observer_agesex == "juvenile" & 
-                                      socatt_final$observerID %in% knownids$ID)] <- "juveniletool"
-table(socatt_final$observer_agesex2, socatt_final$socatt)
-## I THINK THIS DOESN'T WORK IN A FORMAL ANALYSIS
-# because we do reliably recognize juveniles when paying social attention, but not when they are just present
-# so I still think this exploration should be more descriptive (just like who receives more social attention)
-
-socatt_bm1j <- brm(socatt ~ tooluser_age + observer_agesex2 + offset(log(seqduration)) + location + p_total + n_scr + (1|sequenceID),
-                  data = socatt_final, family = bernoulli(),
-                  iter = 2000, chains=2, cores = 2, backend = "cmdstanr", save_pars = save_pars(all = TRUE))
-# saving and loading model
-# saveRDS(socatt_bm1j, "detailedtools/RDS/socatt_bm1j.rds")
-# socatt_bm1j <- readRDS("detailedtools/RDS/socatt_bm1j.rds")
-
-summary(socatt_bm1j)
-mcmc_plot(socatt_bm1j)
-plot(conditional_effects(socatt_bm1j))
-plot(socatt_bm1j)
+############### GOT UNTIL HERE #######################
 
 
-## NOTE: if we want to include subject ID as random effect, need to exclude the unknowns (or ID them!)
-## NOTE: if we'd want to look at outcome or item, we don't have that much variation in the categories. Are those worth it?
-# I don't think they are super interesting per se... Is there harm to including them? maybe as random effects?
-# Interaction of agesex tool user and observer sounds interesting, but a lot of combinations do not occur so it causes convergence issues
-# maybe explore visually rather than in a model? 
+# need to subset to known tool users, and where they successfully opened the item
+# because if they didn't open it, we don't know how efficient the sequence was
+socatt_finali <- socatt_final[!socatt_final$tooluserID %in% c("adultmale", "juvenileunknown", "subadultmale") &
+                                socatt_final$outcome == "opened",]
 
-## MODEL 2 
-# depending on the efficiency of the tool user?
-# need to subset to when they were opened successfully
-
-# then only for when items were opened successfully and we know how efficient the tool user was (n_pounds, n_miss). 
-# more likely to pay attention to more efficient tool users? 
-socatt_bm1b <- brm(socatt ~ tooluser_age + observer_agesex  + n_pounds + n_misstotal + offset(log(seqduration)), 
+### Model socatt_bm2 ###
+# Outcome: social attention 1/0
+# Fixed effects: identity of tool user, agesex of observer, n_pounds needed to open item, n_mistakes(total)
+# Offset of sequence duration 
+socatt_bm1b <- brm(socatt ~ tooluser_age* n_pounds + observer_agesex + n_misstotal + offset(log(seqduration)), 
                    data = socatt_final[socatt_final$outcome == "opened",], family = bernoulli(),
                    iter = 2000, chains=2, cores = 4, backend = "cmdstanr", save_pars = save_pars(all = TRUE))
+# socatt_bm1b <- add_criterion(socatt_bm1b, c("loo", "loo_R2", "bayes_R2"), reloo = TRUE, backend = "cmdstanr", ndraws = 2000) 
+
 # saving and loading model
 # saveRDS(socatt_bm1b, "detailedtools/RDS/socatt_bm1b.rds")
 # socatt_bm1b <- readRDS("detailedtools/RDS/socatt_bm1b.rds")
@@ -997,20 +994,6 @@ socatt_bm1b <- brm(socatt ~ tooluser_age + observer_agesex  + n_pounds + n_misst
 summary(socatt_bm1b)
 mcmc_plot(socatt_bm1b)
 plot(conditional_effects(socatt_bm1b))
-
-hypothesis(soc_att_bm1b, "Intercept  > Intercept + n_pounds", alpha = 0.05)
-
-# consider if interactions are interesting 
-# e.g. number of pounds * age of tool user (so more atttention to efficient subadult than adult?)
-soc_att_bm1c <- brm(attention ~ age_f* n_pounds + item2 +  n_misstotal + offset(log(seqduration)) + (1|subjectID) + location, data = soc_att[soc_att$outcome == "opened",], family = bernoulli(),
-                    iter = 1000, chains=2, cores = 4, backend = "cmdstanr", save_pars = save_pars(all = TRUE))
-# saving and loading model
-# saveRDS(soc_att_bm1c, "detailedtools/RDS/soc_att_bm1c.rds")
-# soc_att_bm1c <- readRDS("detailedtools/RDS/soc_att_bm1c.rds")
-
-summary(soc_att_bm1c)
-mcmc_plot(soc_att_bm1c)
-plot(conditional_effects(soc_att_bm1c))
 
 hypothesis(soc_att_bm1b, "Intercept  > Intercept + n_pounds", alpha = 0.05)
 
