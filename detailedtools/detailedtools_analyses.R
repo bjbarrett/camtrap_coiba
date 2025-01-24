@@ -19,6 +19,7 @@ library(gratia)
 library(easystats)
 library(scales)
 library(ggh4x)
+library(ggeffects)
 
 ## NOTES ###
 # If we have enough data, ideally exclude sequences that are split across multiple videos (split == TRUE) and of which outcome is unknown
@@ -32,7 +33,7 @@ head(detseq)
 head(dettools_r2)
 # every row is a behavior, so this still contains every coded behavior with timestamp, no aggregation
 
-### Filter and general diagnostics ###
+### Filter and general diagnostics ####
 ## Efficiency coding ##
 # how much data do we have?
 nrow(detseq)
@@ -834,17 +835,13 @@ plot(ABE_only$seq_start, ABE_only$tooluse)
 
 # do we see ABE displace/scrounge? 
 ABEcomment <- dettools_r2[str_detect(dettools_r2$comment, "ABE|Abraham"),]
-# 5 recorded instances of him displacing and scrounging
-# all displace
-displacements <- dettools_r2[dettools_r2$displacement == "anvildisp" | dettools_r2$displacement == "fulldisp" |
-dettools_r2$displacement == "hammerdisp",]
-
-ftable(dettools_r2$displacement)
+# 13 recorded instances of him displacing and scrounging
 # how many of displacements is ABE?
-ftable(detseq$displacement)
-# 96 total displacements
-ftable(displacements[!duplicated(displacements$sequenceID),]$scrounging)
-ftable(detseq$scrounging)
+displacers <- append(socatt_seq$disp_ID1, socatt_seq$disp_ID2)
+displacers <- displacers[!is.na(displacers)]
+ftable(displacers)
+ftable(socatt_final$n_disp) # 165 total displacements
+ftable(socatt_final$n_scr) # 400 total scrounging events
 
 ###
 ### SOCIAL ATTENTION ####
@@ -861,38 +858,100 @@ socatt_final$item2 <- ifelse(str_detect(socatt_final$item, "almendra") == FALSE,
 ftable(socatt_final$item2[!duplicated(socatt_final$sequenceID)])
 
 ftable(socatt_final$tooluserID)
+ftable(socatt_final$tooluser_age)
 ftable(socatt_final$observerID)
+ftable(socatt_final$observer_agesex, socatt_final$socatt)
 
 # check for NAs
 which(is.na(socatt_final), arr.ind = TRUE)
+str(socatt_final)
+# make factors
+socatt_final$tooluser_age <- factor(socatt_final$tooluser_age, levels = c("Juvenile", "Subadult", "Adult"))
+socatt_final$observer_agesex <- factor(socatt_final$observer_agesex, levels = c("juvenile", "subadultmale", "adultmale", "adultfemale"))
+socatt_final$location <- as.factor(socatt_final$location)
+socatt_final$tooluserID <- as.factor(socatt_final$tooluserID)
+socatt_final$observerID <- as.factor(socatt_final$observerID)
+socatt_final$item2 <- as.factor(socatt_final$item2)
+socatt_final$sequenceID <- as.factor(socatt_final$sequenceID)
 
-# so we usually have the ID of the tool user, not always of the observer
-# could envision doing a model with ID in subsetted to a more thorough dataset
-# but I think this will be more for descriptives and for the model we do more general on age
-# probably need random effect of sequenceID?
+##### What predicts social attention? #####
 
+### Model socatt_bm1 ###
+# every line in the dataframe is a capuchin present during a tool use sequence
+# Outcome: social attention yes/no 
+# Fixed effects: age of the tool user, age-sex of the observer, total number of capuchins present, location, total number of scroungers
+# Random effect: sequenceID (to account for repeated rows per sequence)
+# Offset of log(sequence duration) reflecting opportunity (longer sequences mean more chances for social attention)
+socatt_bm1 <- brm(socatt ~ tooluser_age + observer_agesex + location + p_total + n_scr + (1|sequenceID) + offset(log(seqduration)),
+                  data = socatt_final, family = bernoulli(),
+                  iter = 2000, chains=2, cores = 2, backend = "cmdstanr", save_pars = save_pars(all = TRUE))
+# socatt_bm1 <- add_criterion(socatt_bm1, c("loo", "loo_R2", "bayes_R2"), reloo = TRUE, backend = "cmdstanr", ndraws = 2000) 
 
-# want to end up with dataframe that's like
-# sequence ID, tool user ID, tool user age sex, present age sex, social attention 1/0, total_n capuchins (excl tool user, incl observer),
-# item processed, outcome of tool use event, sequence duration, location, n_scrounging (?), n_displacement (?)
-
-#
-
-## binomial model predicting whether or not they pay social attention
-# first just generally, is there more likely to be social attention for
-# certain age classes (tool user), certain age classes (observer), at certain locations, when more capuchins are present
-# in combination with scrounging? Offset of sequence duration (opportunity) and inclusion of random effect (sequenceID)
-socatt_bm1 <- brm(socatt ~ tooluser_age + observer_agesex + offset(log(seqduration)) + location + p_total + n_scr + (1|sequenceID),
-                   data = socatt_final, family = bernoulli(),
-                   iter = 2000, chains=2, cores = 2, backend = "cmdstanr", save_pars = save_pars(all = TRUE))
 # saving and loading model
 # saveRDS(socatt_bm1, "detailedtools/RDS/socatt_bm1.rds")
 # socatt_bm1 <- readRDS("detailedtools/RDS/socatt_bm1.rds")
 
+# Diagnostics
 summary(socatt_bm1)
 mcmc_plot(socatt_bm1)
 plot(conditional_effects(socatt_bm1))
 plot(socatt_bm1)
+
+loo(socatt_bm1) # all cases good
+loo_R2(socatt_bm1) # 0.16
+round(bayes_R2(socatt_bm1),2) # 0.33
+
+# Interpretation
+ggpredict(socatt_bm1, term = c("tooluser_age"))
+ggpredict(socatt_bm1, term = c("location", "observer_agesex[juvenile]"))
+
+hypothesis(socatt_bm1, "Intercept + itemalmendrared > Intercept", alpha = 0.05)
+hypothesis(socatt_bm1, "Intercept + observer_agesexsubadultmale < Intercept + observer_agesexjuvenile", alpha = 0.05)
+hypothesis(socatt_bm1, "Intercept > Intercept + anviltypewood", alpha = 0.05)
+
+# Visualization
+socatt_bm1_pred <- socatt_bm1 %>% 
+  epred_draws(newdata = tibble(tooluser_age = socatt_final$tooluser_age,
+                               observer_agesex = socatt_final$observer_agesex,
+                               location = socatt_final$location,
+                               p_total = socatt_final$p_total,
+                               n_scr = socatt_final$n_scr,
+                               sequenceID = socatt_final$sequenceID,
+                               seqduration = socatt_final$seqduration))
+
+# who receives and pays social attention
+cols_obs <- c("#D35171FF", "#FCA636FF", "#0D0887FF", "#B12A90FF" )
+toolusertitles <- c(`Juvenile` = "Juvenile tool user",
+                    `Subadult` = "Subadult tool user",
+                    `Adult` = "Adult tool user")
+
+
+# png("detailedtools/RDS/socatt_ages.png", width = 8, height = 7, units = 'in', res = 300)
+ggplot(data = socatt_bm1_pred, aes(x = observer_agesex, y = .epred)) + geom_boxplot(aes(color = observer_agesex, fill = observer_agesex), alpha = 0.4,  outlier.color = NA) +
+  stat_summary(socatt_final, inherit.aes = FALSE, mapping=aes(x = observer_agesex, y = socatt, color = observer_agesex), geom = "point", fun = "mean",
+               size = 4) +
+  scale_fill_manual(values = cols_obs) +
+  scale_color_manual(values = cols_obs) +
+  guides(color = "none", fill = "none") +
+  labs(x = "Age-sex class of observer", y = "Likelihood to pay social attention") + facet_wrap(~tooluser_age, labeller = as_labeller(toolusertitles)) +
+  theme_bw() + theme(axis.text = element_text(size = 12),
+                     axis.title = element_text(size = 14)) + theme(axis.text.x = element_text(angle =45, hjust = 1))
+# dev.off()
+
+# scrounging and total presence
+# do this by pulling out ggplot object of conditional effects and making the plot with points overlaid?
+# like we used to do for the tidal stuff? check that
+
+ggplot() +geom_smooth(data = socatt_bm1_pred, aes(x = p_total, y = .epred, col = "Present"), method = "loess") + 
+  geom_point(socatt_final, inherit.aes = FALSE, mapping=aes(x = p_total, y = socatt, color = "Present"), geom = "point", alpha = 0.2, size = 3) +
+  geom_smooth(data = socatt_bm1_pred, aes(x = n_scr, y = .epred, col = "Scrounging"), method = "loess") +   
+  geom_point(socatt_final, inherit.aes = FALSE, mapping=aes(x = n_scr, y = socatt, color = "Scrounging"), geom = "point", alpha = 0.2, size = 3) +
+
+
+# STILL SOME KIND OF VISUALIZATION OF WHICH SPECIFIC INDIVIDUALS MOSTLY HAD SOCIAL ATTENTION
+  # ALSO TRY TO SOMEHOW CAPTURE/EXPLAIN THE KNOWN VS UNKNOWN JUVENILES
+  # AND STILL DO MODEL ON WHETHER EFFICIENT TOOL USERS ATTRACT MORE SOCIAL ATTENTION (CAN PROB USE THAT OUTPUT FOR THE INDIVIDUALS)
+
 
 ## alternatively, differentiate known and unknown juveniles (so known tool users, and likely not tool users)
 socatt_final$observer_agesex2 <- socatt_final$observer_agesex
