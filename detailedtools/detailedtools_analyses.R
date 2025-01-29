@@ -45,10 +45,17 @@ length(unique(detseq$mediadate))
 ftable(detseq$location)
 ftable(detseq$scrounging)
 ftable(detseq$displacement)
-
-ggplot(detseq, 
-       aes(x = mediadate, fill = location)) + geom_histogram() + theme_bw()
 ftable(detseq$socatt)
+ftable(detseq$hammerID, detseq$location)
+
+# plot of sequences per location
+# png("detailedtools/RDS/locationscoverage.png", width = 8, height = 6, units = 'in', res = 300)
+ggplot(detseq, 
+       aes(x = mediadate)) + geom_histogram() + facet_wrap(~location) + theme_bw() +
+  labs(x = "Date", y = "Number of tool use sequences") +
+  theme_bw() + theme(axis.text = element_text(size = 12),
+                     axis.title = element_text(size = 14)) + theme(axis.text.x = element_text(angle =45, hjust = 1))
+# dev.off()
 
 # only include tool use sequences that were successful (so outcome = opened) to be able to measure efficiency
 # consider variability in the items processed
