@@ -528,7 +528,11 @@ socatt_ct$scrounging <- paste(socatt_ct$modifier1, socatt_ct$behavior)
 socatt_ct$scrounging <- ifelse(socatt_ct$scrounging == "tolerated scrounge", "tol_scrounge",
                                ifelse(socatt_ct$scrounging == "afterwards scrounge", "aft_scrounge",
                                       ifelse(socatt_ct$scrounging == "None scrounge", "steal_scrounge", socatt_ct$scrounging)))
-ftable(socatt_ct[socatt_ct$behavior == "scrounge", c("sequenceID", "scrounging")])
+scrounger_mod <- as.data.frame(as.matrix(ftable(socatt_ct[socatt_ct$behavior == "scrounge", c("sequenceID", "scrounging")])))
+head(scrounger_mod)
+scrounger_mod$sequenceID <- rownames(scrounger_mod)
+
+socatt_seq <- left_join(socatt_seq, scrounger_mod, by = "sequenceID")
 
 # who is present
 presence <- socatt_ct[socatt_ct$behavior == "present",]
@@ -549,7 +553,7 @@ socatt_seq <- socatt_seq %>%
   mutate_at(vars("n_socatt", "sa_nAF", "sa_nAM", "sa_nJM", "sa_nJU", "sa_nSM", 
                  "sa_nJuveniles", "sa_nAdults", "sa_nSubadults", "n_disp", "n_scr", "p_nAF",
                  "p_nAM", "p_nJM", "p_nJU", "p_nSM", "p_nUU", "p_total", "p_nJuveniles",
-                 "p_nAdults", "p_nSubadults"), ~replace_na(.,0))
+                 "p_nAdults", "p_nSubadults", "aft_scrounge", "tol_scrounge", "steal_scrounge"), ~replace_na(.,0))
 
 ### Datasets we are now left with ####
 # detseq #
@@ -592,7 +596,8 @@ socatt_seq <- socatt_seq[,c("videoID", "codingdate", "medianame", "videolength",
                             "n_disp", "n_scr", "p_total", "socatt_ID1", "socatt_ID2", "socatt_ID3", "sa_nAF",
                             "sa_nAM", "sa_nJU", "sa_nSM", "sa_nJuveniles","sa_nAdults", "sa_nSubadults", "disp_ID1",
                             "disp_ID2", "scr_ID1", "scr_ID2", "scr_ID3", "scr_ID4", "p_nAF", "p_nAM", "p_nJM",
-                            "p_nJU", "p_nSM", "p_nUU", "p_nJuveniles","p_nJuveniles", "p_nAdults", "p_nSubadults")]
+                            "p_nJU", "p_nSM", "p_nUU", "p_nJuveniles","p_nJuveniles", "p_nAdults", "p_nSubadults",
+                            "aft_scrounge", "tol_scrounge", "steal_scrounge")]
 #saveRDS(socatt_seq, "detailedtools/RDS/socatt_seq.rds")
 
 # Generate sample of 100 sequences for interrater reliability

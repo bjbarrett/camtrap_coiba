@@ -144,7 +144,7 @@ socatt_final <- left_join(socatt_final, detseq[,c("sequenceID", "subjectID", "co
 
 # also add more detailed information on number of capuchins present, number scrounging etc, from the social coding
 head(socatt_seq)
-socatt_final <- left_join(socatt_final, socatt_seq[,c("sequenceID", "n_socatt", "n_disp", "n_scr", "p_total")],
+socatt_final <- left_join(socatt_final, socatt_seq[,c("sequenceID", "n_socatt", "n_disp", "n_scr", "p_total", "tol_scrounge", "aft_scrounge", "steal_scrounge")],
                           by = "sequenceID")
 
 ######### TEMPORARY UNTIL ALL CODING IS DONE
@@ -179,7 +179,7 @@ socatt_final$socialattention <- ifelse(socatt_final$sequenceID %in% socsequences
 socatt_final <- socatt_final[,c("sequenceID", "videoID", "deployment", "location", "anviltype", "seqduration", "coder_socatt", 
                                 "coder_tooluse", "split", "item", "observerID", "observer_agesex", "socatt","tooluserID", "tooluser_age",
                                 "n_pounds", "n_misstotal", "hammerswitches", "anvilswitches", "n_socatt", "n_disp", "n_scr", "p_total",
-                                "outcome", "displacement", "scrounging", "socialattention")]
+                                "outcome", "displacement", "scrounging", "socialattention", "tol_scrounge", "aft_scrounge", "steal_scrounge")]
 
 # some descriptives
 # how many of these sequences are split across various videos (so information missing)
@@ -202,10 +202,8 @@ socatt_final <- socatt_final[socatt_final$split == FALSE & !socatt_final$observe
 # then have 839 sequences
 length(unique(socatt_final$sequenceID))
 
-
-
 ###
-### EFFICIENCY ####
+### PROFICIENCY ####
 ###
 
 ## Comparing efficiency between age classes on opened sequences, multiple measures
@@ -971,6 +969,14 @@ soc_present  + theme_bw() +
   theme(legend.text =  element_text(size = 12), 
         legend.title = element_text(size =14),axis.title = element_text(size = 14), axis.text = element_text(size = 12))
 #dev.off()  
+
+# descriptives on type of scrounging (tolerated vs afterwards vs stealing)
+ftable(socatt_final$tol_scrounge, socatt_final$socatt)
+length(socatt_final$tol_scrounge[socatt_final$tol_scrounge > 0])
+# 106 out of 254 sequences with tolerated scrounging had social attention
+ftable(socatt_final$aft_scrounge, socatt_final$socatt)
+length(socatt_final$aft_scrounge[socatt_final$aft_scrounge > 0])
+# 13 out of 149 sequences with scrounging after the tool user was done had social attention
 
 ##### Social attention to efficient tool users #####
 
