@@ -1872,13 +1872,22 @@ for(i in 2:nrow(gridseq_ocNTUc)) {
 
 hist(gridseq_ocNTUc$time)
 
-ggplot(data= gridseq_ocTUc[!gridseq_ocTUc$obsnumber == 1,], aes(x = obsnumber, y = space)) + geom_point() + geom_point(aes(col = time), alpha = 0.5) + 
-  stat_summary(data = gridseq_ocTUc[!gridseq_ocTUc$obsnumber == 1,], aes(x = obsnumber, y = space), fun = mean, geom = "point", inherit.aes = FALSE, size = 3, shape = 15) +
-  ggtitle("Tool-Users")
+ggplot(data= gridseq_ocTUc[!gridseq_ocTUc$obsnumber == 1,], aes(x = obsnumber, y = space)) + geom_point() + geom_point(aes(col = time), alpha = 0.3, size = 3) + 
+  stat_summary(data = gridseq_ocTUc[!gridseq_ocTUc$obsnumber == 1,], aes(x = obsnumber, y = space), fun = mean, geom = "point", inherit.aes = FALSE, size = 3, color = "red", shape = 15) +
+  ggtitle("Tool-Users") + scale_colour_viridis_c() + 
+  labs(x = "Number of consecutive observation per day", y = "Distance (meters) to previous sighting", color = "Time (seconds) to previous sighting") +
+  theme_bw() + theme(axis.text = element_text(size = 12),
+                     axis.title = element_text(size = 14))
 
-ggplot(data= gridseq_ocNTUc[!gridseq_ocNTUc$obsnumber == 1,], aes(x = obsnumber, y = space)) + geom_point(aes(col = time), alpha = 0.5) +
-  stat_summary(data = gridseq_ocNTUc[!gridseq_ocNTUc$obsnumber == 1,], aes(x = obsnumber, y = space), fun = mean, geom = "point", inherit.aes = FALSE, size = 3, shape = 15) +
-  ggtitle("Non-tool-users")
+ggplot(data= gridseq_ocNTUc[!gridseq_ocNTUc$obsnumber == 1,], aes(x = obsnumber, y = space)) + geom_point(aes(col = time), alpha = 0.3, size = 3) +
+  stat_summary(data = gridseq_ocNTUc[!gridseq_ocNTUc$obsnumber == 1,], aes(x = obsnumber, y = space), fun = mean, geom = "point", inherit.aes = FALSE, size = 3, color = "red", shape = 15) +
+  ggtitle("Non-tool-users") +scale_colour_viridis_c() + 
+  labs(x = "Number of consecutive observation per day", y = "Distance (meters) to previous sighting", color = "Time (seconds) to previous sighting") +
+  theme_bw() + theme(axis.text = element_text(size = 12),
+                     axis.title = element_text(size = 14))
+
+
+
 
 test <- gridseq_ocNTUc[c("seq_start","space","time")]
 

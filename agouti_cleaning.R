@@ -677,3 +677,9 @@ agoutiselect2$season <- ifelse(agoutiselect2$month == 12 | agoutiselect2$month =
 
 agoutiselect2$locationfactor <- as.factor(agoutiselect2$locationName)
 agoutiselect2$tooluse[agoutiselect2$noanimal == 1] <- 0
+
+# Save dataframes as RDS so you don't always have to re-run this script but can just load these in
+saveRDS(agoutiselect2, "agouti_output/agoutiselect2.rds")
+saveRDS(agouticlean, "agouti_output/agouticlean.rds")
+saveRDS(agoutisequence, "agouti_output/agoutisequence.rds")
+saveRDS(agoutisequence_c, "agouti_output/agoutisequence_c.rds")
