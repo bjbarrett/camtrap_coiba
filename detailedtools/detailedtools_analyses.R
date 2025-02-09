@@ -202,6 +202,51 @@ socatt_final <- socatt_final[socatt_final$split == FALSE & !socatt_final$observe
 # then have 839 sequences
 length(unique(socatt_final$sequenceID))
 
+### PRIORS ####
+## need to set appropriate priors for models of different families
+# brms default for poisson
+brms_default <- c(prior(student_t(3, 2.3, 2.5), class = Intercept),
+                  prior(student_t(3, 0, 2.5), class = sd),
+                  prior(normal(0, 99999), class = b)) #flat prior
+
+# brms default for zero inflated poisson
+brms_default2 <- c(prior(student_t(3, -2.3, 2.5), class = Intercept),
+                  prior(student_t(3, 0, 2.5), class = sd),
+                  prior(normal(0, 99999), class = b)) #flat prior
+
+# brms default for bernoulli
+brms_default3 <- c(prior(student_t(3, 0, 2.5), class = Intercept),
+                  prior(student_t(3, 0, 2.5), class = sd),
+                  prior(normal(0, 99999), class = b)) #flat prior
+
+# our prior for poisson
+normal_prior <- c(prior(normal(0, 1), class = Intercept),
+                   prior(normal(0,1), class = b),
+                   prior(exponential(1), class = sd))
+
+# our prior for zero inflated poisson
+normal_prior2 <- c(prior(normal(0,1), class = b),
+                prior(exponential(1), class = sd))
+
+# our prior for poisson without random effect
+normal_prior3 <- c(prior(normal(0, 1), class = Intercept),
+                  prior(normal(0,1), class = b))
+
+# prior for bernoulli models on social attention
+normal_prior4 <- c(prior(normal(0,1), class = b),
+                   prior(normal(0,1), class = b, coef = "locationEXPMANVM01"),
+                   prior(normal(0,1), class = b, coef = "n_scr"),
+                   prior(normal(0,1), class = b, coef = "observer_agesexadultfemale"),
+                   prior(normal(0,1), class = b, coef = "observer_agesexadultmale"),
+                   prior(normal(0,1), class = b, coef = "observer_agesexsubadultmale"),
+                   prior(normal(0,1), class = b, coef = "p_total"),
+                   prior(normal(0,1), class = b, coef = "tooluser_ageAdult"),
+                   prior(normal(0,1), class = b, coef = "tooluser_ageSubadult"),
+                   prior(normal(0,1), class = Intercept),
+                   prior(exp(1), class = sd))
+
+
+
 ###
 ### PROFICIENCY ####
 ###
@@ -228,10 +273,34 @@ plot(testdist1.2)
 # Outcome: sequence duration (seconds)
 # Fixed effects: age, item (ripeness of sea almond) and anviltype (wood or stone) 
 # Random effects: subjectID (identity of tool user)
-m_e1 <- brm(seqduration ~ Age + item + anviltype + (1|subjectID), data = detseq_oi, iter = 2000, 
-            save_pars = save_pars(all = TRUE), chain = 2, core = 2, backend = "cmdstanr", 
-            control = list(adapt_delta = 0.99), family = "gamma")
-# m_e1 <- add_criterion(m_e1, c("loo", "loo_R2", "bayes_R2"), reloo = TRUE, backend = "cmdstanr", ndraws = 2000) 
+
+# prior predictive simulation
+# compare default brms prior to what we want to set
+m_e1_prior <- brm(seqduration ~ Age + item + anviltype + (1|subjectID), data = detseq_oi, iter = 1000, 
+                  chain = 2, core = 2, backend = "cmdstanr", 
+                  family = "gamma", prior = brms_default, sample_prior = "only")
+
+summary(m_e1_prior)
+prior_summary(m_e1_prior)
+mcmc_plot(m_e1_prior)
+plot(m_e1_prior)
+# complete flat prior on the estimates seems excessive
+
+# our prior (with normal (0,1) instead of flat prior. 
+m_e1_prior2 <-  brm(seqduration ~ Age + item + anviltype + (1|subjectID), data = detseq_oi, iter = 1000, 
+                    chain = 2, core = 2, backend = "cmdstanr", 
+                    family = "gamma", prior = normal_prior, sample_prior = "only")
+
+summary(m_e1_prior2)
+prior_summary(m_e1_prior2)
+mcmc_plot(m_e1_prior2)
+plot(m_e1_prior2)
+
+# Use our prior
+m_e1 <- brm(seqduration ~ Age + item + anviltype + (1|subjectID), data = detseq_oi, iter = 3000, 
+            save_pars = save_pars(all = TRUE), chain = 3, core = 3, backend = "cmdstanr", 
+            control = list(adapt_delta = 0.99), family = "gamma", prior = normal_prior, seed = 1022028329)
+# m_e1 <- add_criterion(m_e1, c("loo", "loo_R2", "bayes_R2"), reloo = TRUE, backend = "cmdstanr", ndraws = 3000) 
 
 # saving model to not have to run it again
 # saveRDS(m_e1, "detailedtools/RDS/m_e1.rds")
@@ -250,12 +319,12 @@ round(bayes_R2(m_e1),2) # 0.23
 plot(m_e1$criteria$loo, label_points = TRUE)
 
 # Interpretation
-round(exp(2.99),2)
+round(c(exp(0.48), exp(0.48), exp(0.48)),2)
 
 hypothesis(m_e1, "Intercept  > Intercept + AgeSubadult", alpha = 0.05)
 hypothesis(m_e1, "Intercept  > Intercept + AgeAdult", alpha = 0.05)
 hypothesis(m_e1, "Intercept + AgeAdult  < Intercept + AgeSubadult", alpha = 0.05)
-hypothesis(m_e1, "Intercept + itemalmendragreen > Intercept", alpha = 0.05)
+hypothesis(m_e1, "Intercept + itemalmendrared > Intercept", alpha = 0.05)
 
 # report(m_e1)
 
@@ -304,10 +373,33 @@ plot(testdist2.1)
 # Outcome: number of pounds
 # Fixed effects: age, item, and anviltype
 # Random effects: subjectID
+
+# prior predictive simulation
+# compare default brms prior to what we want to set
+m_e2_prior <- brm(n_pounds ~ Age + item + anviltype + (1|subjectID), data = detseq_oi, family = "poisson",
+                  iter = 1000, chain = 2, core = 2, backend = "cmdstanr", 
+                  prior = brms_default, sample_prior = "only")
+
+summary(m_e2_prior)
+prior_summary(m_e2_prior)
+mcmc_plot(m_e2_prior)
+plot(m_e2_prior)
+
+# our prior (with normal (0,1) instead of flat prior. 
+m_e2_prior2 <-  brm(n_pounds ~ Age + item + anviltype + (1|subjectID), data = detseq_oi, family = "poisson",
+                     iter = 1000, chain = 2, core = 2, backend = "cmdstanr", 
+                     prior = normal_prior, sample_prior = "only")
+
+summary(m_e2_prior2)
+prior_summary(m_e2_prior2)
+mcmc_plot(m_e2_prior2)
+plot(m_e2_prior2)
+
+# use our priors
 m_e2 <- brm(n_pounds ~ Age + item + anviltype + (1|subjectID), data = detseq_oi, family = "poisson", 
-            iter = 2000, chain = 2, core = 2, save_pars = save_pars(all = TRUE), 
-            control = list(adapt_delta = 0.99), backend = "cmdstanr")
-# m_e2 <- add_criterion(m_e2, c("loo", "loo_R2", "bayes_R2"), reloo = TRUE, backend = "cmdstanr", ndraws = 2000) 
+            iter = 3000, chain = 3, core = 3, save_pars = save_pars(all = TRUE), prior = normal_prior, 
+            control = list(adapt_delta = 0.99), backend = "cmdstanr", seed = 12345)
+# m_e2 <- add_criterion(m_e2, c("loo", "loo_R2", "bayes_R2"), reloo = TRUE, backend = "cmdstanr", ndraws = 3000) 
 
 # save and load model
 # saveRDS(m_e2, "detailedtools/RDS/m_e2.rds")
@@ -324,11 +416,10 @@ loo_R2(m_e2) # 0.12
 round(bayes_R2(m_e2),2) # 0.12
 
 # Interpretation
-round(exp(1.64),2)
-hypothesis(m_e2, "Intercept + itemalmendrared > Intercept", alpha = 0.05)
+round(c(exp(0.08), exp(0.05), exp(0.12)),2)
+hypothesis(m_e2, "Intercept + itemalmendragreen > Intercept", alpha = 0.05)
 hypothesis(m_e2, "Intercept > Intercept + AgeAdult", alpha = 0.05)
 hypothesis(m_e2, "Intercept > Intercept + anviltypewood", alpha = 0.05)
-
 
 # Visualization
 m_type_pred2 <- m_e2 %>% 
@@ -365,15 +456,41 @@ ggplot(data = m_type_pred2, aes(x = item, y = .epred)) + geom_violin(aes(color =
 # colors for juvenile, subadult, adult
 cols <- viridis(3, option = "plasma", end = 0.8)
 
-# png("detailedtools/RDS/duration_pound.png", width = 8, height = 7, units = 'in', res = 300)
+# png("detailedtools/RDS/duration_pound.png", width = 8, height = 6, units = 'in', res = 300)
 ggplot(detseq_oi, aes(y = seqduration, x = n_pounds, color = Age, shape = Age)) + geom_point(size = 3, alpha = 0.3) + geom_smooth() + 
   scale_color_viridis_d(option = "plasma", end = 0.8) +
   labs(y = "Seconds needed to open item", x = "Number of pounds needed to open item") +
   theme_bw() + theme(axis.text = element_text(size = 12),
-                     axis.title = element_text(size = 14)) 
+                     axis.title = element_text(size = 14)) + facet_wrap(~Age)
 # dev.off()
 
-##### 3. Number of repositions ######
+# formal model, m_e2 but with offset of sequence duration
+m_e2b <- brm(n_pounds ~ Age + item + anviltype + (1|subjectID) + offset(log(seqduration)), data = detseq_oi, family = "poisson", 
+            iter = 3000, chain = 3, core = 3, save_pars = save_pars(all = TRUE), prior = normal_prior, 
+            control = list(adapt_delta = 0.99), backend = "cmdstanr", seed = 12345)
+# m_e2b <- add_criterion(m_e2b, c("loo", "loo_R2", "bayes_R2"), reloo = TRUE, backend = "cmdstanr", ndraws = 3000) 
+
+# save and load model
+# saveRDS(m_e2b, "detailedtools/RDS/m_e2b.rds")
+# m_e2b <- readRDS("detailedtools/RDS/m_e2b.rds")
+
+# Diagnostics
+summary(m_e2b)
+pp_check(m_e2b)
+mcmc_plot(m_e2b)
+plot(conditional_effects(m_e2b))
+
+loo(m_e2b) # all cases good
+loo_R2(m_e2b) # 0.40
+round(bayes_R2(m_e2b),2) # 0.69
+
+# Interpretation
+round(c(exp(-1.30), exp(-1.46), exp(-1.15)),2)
+hypothesis(m_e2, "Intercept + itemalmendragreen > Intercept", alpha = 0.05)
+hypothesis(m_e2, "Intercept > Intercept + AgeAdult", alpha = 0.05)
+hypothesis(m_e2, "Intercept > Intercept + anviltypewood", alpha = 0.05)
+
+##### 3. Number of repositions and peels ######
 
 ## 3a: repositions of item
 
@@ -381,10 +498,27 @@ ggplot(detseq_oi, aes(y = seqduration, x = n_pounds, color = Age, shape = Age)) 
 # Outcome: number of repositions
 # Fixed effects: age, item, anviltype
 # Random effects: subjectID
+
+# prior predictive simulation
+# compare default brms prior to what we want to set
+m_e3a_prior <- brm(n_itemreposit ~ Age + item + anviltype + (1|subjectID), data = detseq_oi, family = "poisson", 
+                   iter = 1000, chain = 2, core = 2, backend = "cmdstanr",
+                  prior = brms_default, sample_prior = "only")
+
+plot(m_e3a_prior)
+
+# our prior (with normal (0,1) instead of flat prior. 
+m_e3a_prior2 <-  brm(n_itemreposit ~ Age + item + anviltype + (1|subjectID), data = detseq_oi, family = "poisson", 
+                     iter = 1000, chain = 2, core = 2, backend = "cmdstanr",
+                     prior = normal_prior, sample_prior = "only")
+
+plot(m_e3a_prior2)
+
+# use our normal(0,1) prior instead of brms default
 m_e3a <- brm(n_itemreposit ~ Age + item + anviltype + (1|subjectID), data = detseq_oi, family = "poisson", 
-             iter = 2000, chain = 2, core = 2, control = list(adapt_delta = 0.99),
-             save_pars = save_pars(all = TRUE), backend = "cmdstanr")
-# m_e3a <- add_criterion(m_e3a, c("loo", "loo_R2", "bayes_R2"), reloo = TRUE, backend = "cmdstanr", ndraws = 2000) 
+             iter = 3000, chain = 3, core = 3, control = list(adapt_delta = 0.99), prior = normal_prior,
+             save_pars = save_pars(all = TRUE), backend = "cmdstanr", seed = 12345)
+# m_e3a <- add_criterion(m_e3a, c("loo", "loo_R2", "bayes_R2"), reloo = TRUE, backend = "cmdstanr", ndraws = 3000) 
 
 # saving and loading model
 # saveRDS(m_e3a, "detailedtools/RDS/m_e3a.rds")
@@ -401,7 +535,7 @@ round(loo_R2(m_e3a),2) # 0.15
 round(bayes_R2(m_e3a),2) # 0.17 
 
 # Interpretation
-round(exp(0.20),2)
+round(c(exp(0.07-1.22), exp(0.07-1.97), exp(0.07-0.32)),2)
 hypothesis(m_e3a, "Intercept > Intercept + AgeAdult", alpha = 0.05)
 hypothesis(m_e3a, "Intercept > Intercept + AgeSubadult", alpha = 0.05)
 
@@ -429,10 +563,27 @@ ggplot(data = m_type_pred3, aes(x = Age, y = .epred)) + geom_violin(aes(color = 
 # Outcome: number of peels
 # Fixed effects: age, item, anviltype
 # Random effects: subjectID
+
+# prior predictive simulation
+# compare default brms prior to what we want to set
+m_e3b_prior <- brm(n_peel ~ Age + item + anviltype + (1|subjectID), data = detseq_oi, family = "poisson", 
+                   iter = 1000, chain = 2, core = 2, backend = "cmdstanr",
+                   prior = brms_default, sample_prior = "only")
+
+plot(m_e3b_prior)
+
+# our prior (with normal (0,1) instead of flat prior. 
+m_e3b_prior2 <-  brm(n_peel ~ Age + item + anviltype + (1|subjectID), data = detseq_oi, family = "poisson", 
+                     iter = 1000, chain = 2, core = 2, backend = "cmdstanr",
+                     prior = normal_prior, sample_prior = "only")
+
+plot(m_e3b_prior2)
+
+# use our normal(0,1) prior instead of default brms
 m_e3b <- brm(n_peel ~ Age + item + anviltype + (1|subjectID), data = detseq_oi,
-             save_pars = save_pars(all = TRUE), family = "poisson", iter = 2000,
-             chain = 2, core = 2, backend = "cmdstanr")
-# m_e3b <- add_criterion(m_e3b, c("loo", "loo_R2", "bayes_R2"), reloo = TRUE, backend = "cmdstanr", ndraws = 2000) 
+             save_pars = save_pars(all = TRUE), family = "poisson", iter = 3000,
+             chain = 3, core = 3, backend = "cmdstanr", seed = 12345, prior = normal_prior)
+# m_e3b <- add_criterion(m_e3b, c("loo", "loo_R2", "bayes_R2"), reloo = TRUE, backend = "cmdstanr", ndraws = 3000) 
 
 # saving and loading model
 # saveRDS(m_e3b, "detailedtools/RDS/m_e3b.rds")
@@ -445,12 +596,12 @@ pp_check(m_e3b)
 plot(conditional_effects(m_e3b))
 
 loo(m_e3b) # all cases good
-round(loo_R2(m_e3b),2) # 0.10
-round(bayes_R2(m_e3b),2) # 0.12 
+round(loo_R2(m_e3b),2) # 0.11
+round(bayes_R2(m_e3b),2) # 0.11 
 
 # Interpretation
-round(exp(0.35),2)
-hypothesis(m_e3b, "Intercept > Intercept + AgeSubadult", alpha = 0.05)
+round(c(exp(0.35), exp(0.18), exp(0.51)),2)
+hypothesis(m_e3b, "Intercept > Intercept + AgeAdult", alpha = 0.05)
 hypothesis(m_e3b, "Intercept + itemalmendragreen > Intercept", alpha = 0.05)
 
 # make violin plot
@@ -496,9 +647,28 @@ plot(testdist3.1)
 # Outcome: number of misstrikes (true misses)
 # Fixed effects: age, item, and anviltype
 # Random effects: subjectID
+
+# prior predictive simulation
+# compare default brms prior to what we want to set
+m_e4a_prior <- brm(n_miss ~ Age + item + anviltype + (1|subjectID), data = detseq_oi, family = zero_inflated_poisson, 
+                   iter = 1000, chain = 2, core = 2, backend = "cmdstanr",
+                   prior = brms_default2, sample_prior = "only")
+
+plot(m_e4a_prior)
+
+# our prior (with normal (0,1) instead of flat prior. 
+# but leave intercept the same as brms default
+m_e4a_prior2 <-  brm(n_miss ~ Age + item + anviltype + (1|subjectID), data = detseq_oi, family = zero_inflated_poisson, 
+                     iter = 1000, chain = 2, core = 2, backend = "cmdstanr",
+                     prior = normal_prior2, sample_prior = "only")
+
+plot(m_e4a_prior2)
+
+# use our prior
 m_e4a <- brm(n_miss ~ Age + item + anviltype + (1|subjectID), data = detseq_oi, family = zero_inflated_poisson, 
-             iter = 2000, chain = 2, core = 2, save_pars = save_pars(all = TRUE), backend = "cmdstanr", control = list(adapt_delta = 0.99))
-# m_e4a <- add_criterion(m_e4a, c("loo", "loo_R2", "bayes_R2"), reloo = TRUE, backend = "cmdstanr", ndraws = 2000) 
+             iter = 3000, chain = 3, core = 3, save_pars = save_pars(all = TRUE), prior = normal_prior2,
+             backend = "cmdstanr", control = list(adapt_delta = 0.99), seed = 12345)
+# m_e4a <- add_criterion(m_e4a, c("loo", "loo_R2", "bayes_R2"), reloo = TRUE, backend = "cmdstanr", ndraws = 3000) 
 
 # saving and loading model
 # saveRDS(m_e4a, "detailedtools/RDS/m_e4a.rds")
@@ -511,12 +681,12 @@ pp_check(m_e4a)
 plot(conditional_effects(m_e4a))
 
 loo(m_e4a) # all cases good
-loo_R2(m_e4a) # 0.17
+loo_R2(m_e4a) # 0.20
 round(bayes_R2(m_e4a),2) # 0.16
 
 # Interpretation
-round(exp(-0.77-3.63),2) * 0.48
-hypothesis(m_e4a, "Intercept > Intercept + AgeSubadult", alpha = 0.05)
+round(exp(-1.93+0.88),2) * 0.48
+hypothesis(m_e4a, "Intercept > Intercept + AgeAdult", alpha = 0.05)
 
 # make violin plot
 m_type_pred4 <- m_e4a %>% 
@@ -542,11 +712,29 @@ ggplot(data = m_type_pred4, aes(x = Age, y = .epred)) + geom_boxplot(aes(color =
 # Outcome: number of itemflies (item flying off)
 # Fixed effects: age, item, and anviltype
 # Random effects: subjectID
+
+# prior predictive simulation
+# compare default brms prior to what we want to set
+m_e4b_prior <- brm(n_flies ~ Age + item + anviltype + (1|subjectID), data = detseq_oi, family = zero_inflated_poisson, 
+                   iter = 1000, chain = 2, core = 2, backend = "cmdstanr",
+                   prior = brms_default2, sample_prior = "only")
+
+plot(m_e4b_prior)
+
+# our prior (with normal (0,1) instead of flat prior. 
+# but leave intercept the same as brms default
+m_e4b_prior2 <-  brm(n_flies ~ Age + item + anviltype + (1|subjectID), data = detseq_oi, family = zero_inflated_poisson, 
+                     iter = 1000, chain = 2, core = 2, backend = "cmdstanr",
+                     prior = normal_prior2, sample_prior = "only")
+
+plot(m_e4b_prior2)
+
+# use our prior
 m_e4b <- brm(n_flies ~ Age + item + anviltype + (1|subjectID), data = detseq_oi, 
-             family = zero_inflated_poisson, iter = 2000, chain = 2, core = 2, 
-             save_pars = save_pars(all = TRUE),
+             family = zero_inflated_poisson, iter = 3000, chain = 3, core = 3, 
+             save_pars = save_pars(all = TRUE), prior = normal_prior2, seed = 12345,
              backend = "cmdstanr", control = list(adapt_delta = 0.99))
-# m_e4b <- add_criterion(m_e4b, c("loo", "loo_R2", "bayes_R2"), reloo = TRUE, backend = "cmdstanr", ndraws = 2000) 
+# m_e4b <- add_criterion(m_e4b, c("loo", "loo_R2", "bayes_R2"), reloo = TRUE, backend = "cmdstanr", ndraws = 3000) 
 
 # saving and loading model
 # saveRDS(m_e4b, "detailedtools/RDS/m_e4b.rds")
@@ -559,15 +747,16 @@ pp_check(m_e4b)
 plot(conditional_effects(m_e4b))
 
 loo(m_e4b) # all cases good
-loo_R2(m_e4b) # 0.10
-round(bayes_R2(m_e4b),2) # 0.13
+loo_R2(m_e4b) # 0.12
+round(bayes_R2(m_e4b),2) # 0.11
 
 # Interpretation
-round(exp(-0.54),2) * 0.40
+round(exp(1.56),2) * 0.42
 hypothesis(m_e4b, "Intercept > Intercept + AgeAdult", alpha = 0.05)
 hypothesis(m_e4b, "Intercept > Intercept + anviltypewood", alpha = 0.05)
 hypothesis(m_e4b, "Intercept + itemalmendragreen > Intercept", alpha = 0.05)
 hypothesis(m_e4b, "Intercept  + itemalmendrared > Intercept", alpha = 0.05)
+hypothesis(m_e4b, "Intercept > Intercept + anviltypewood", alpha = 0.05)
 
 # make violin plot
 m_type_pred4b <- m_e4b %>% 
@@ -760,70 +949,35 @@ ggplot(detseq_o2[detseq_o2$item == c("almendrabrown"),]) +
   labs(x = "Date", y = "Number per sequence") +theme(axis.text = element_text(size = 12),  axis.title = element_text(size = 14)) 
 # dev.off()
 
-###### GAMs of tool use development ######
-detseq_o2$time <- as.numeric(difftime(detseq_o2$mediadate, min(detseq_o2$mediadate), unit = "days"))
+###### Models of tool use development ######
+detseq_o2$time <- as.numeric(detseq_o2$mediadate)
 head(detseq_o2$time)
 detseq_o2$subjectID_F <- as.factor(detseq_o2$subjectID)
 detseq_o2$Age_f <- as.factor(detseq_o2$Age)
+# filter to only brown sea almonds
+detseq_o2ab <- detseq_o2[detseq_o2$item == "almendrabrown",]
+detseq_o2ab <- droplevels.data.frame(detseq_o2ab)
 
-## Model dev_gam1 ##
+## Model dev_m1 ##
 # outcome: n_pounds
-# fixed effects: time (days since start of deployment), with a curve for each age class
-# random effect of subjectID
-
-# MGCV
-dev_gam1 <- gam(n_pounds ~ s(time, by = Age_f) + Age_f + s(subjectID_F, bs = "re"), 
-                data = detseq_o2[detseq_o2$item == "almendrabrown",], family = "poisson", method = "REML")
-summary(dev_gam1)
-draw(dev_gam1)
-plot(dev_gam1)
-
-# BRMS
-dev_gam1b <- brm(n_pounds ~ s(time, by = Age_f) + Age_f + s(subjectID_F, bs = "re"), 
-                 data=detseq_o2[detseq_o2$item == "almendrabrown",], family="poisson", 
-               chains=2, cores = 2, backend = "cmdstanr", save_pars = save_pars(all = TRUE),
-               iter = 2000)
-# dev_gam1b <- add_criterion(dev_gam1b, c("loo", "loo_R2", "bayes_R2"), reloo = TRUE, backend = "cmdstanr", ndraws = 2000) 
-
-# saving and loading model
-# saveRDS(dev_gam1b, "detailedtools/RDS/dev_gam1b.rds")
-# dev_gam1b <- readRDS("detailedtools/RDS/dev_gam1b.rds")
-plot(conditional_smooths(dev_gam1b))
-plot(conditional_effects(dev_gam1b))
-
-## BRMS linear
-dev_m1 <- brm(n_pounds ~ time*subjectID_F, data=detseq_o2[detseq_o2$item == "almendrabrown",], family="poisson", 
-              chains=2, cores = 2, backend = "cmdstanr", save_pars = save_pars(all = TRUE),
-              iter = 2000)
-# dev_m1 <- add_criterion(dev_m1, c("loo", "loo_R2", "bayes_R2"), reloo = TRUE, backend = "cmdstanr", ndraws = 2000) 
+# fixed effects: log(time) * subjectID
+dev_m1 <- brm(n_pounds ~ log(time)*subjectID_F, data=detseq_o2ab, family="poisson", 
+              chains=3, cores = 3, backend = "cmdstanr", save_pars = save_pars(all = TRUE),
+              iter =3000, init = 0, prior = normal_prior3, seed = 12345)
+# dev_m1 <- add_criterion(dev_m1, c("loo", "loo_R2", "bayes_R2"), reloo = TRUE, backend = "cmdstanr", ndraws = 3000) 
 
 # saving and loading model
 # saveRDS(dev_m1, "detailedtools/RDS/dev_m1.rds")
 # dev_m1 <- readRDS("detailedtools/RDS/dev_m1.rds")
+
 summary(dev_m1)
+plot(conditional_effects(dev_m1))
+mcmc_plot(dev_m1)
+pp_check(dev_m1)
 
-## Model dev_gam2 ##
-# outcome: n_pounds
-# fixed effects: time (days since start of deployment), with a curve for each individual
-
-# MGCV
-dev_gam2 <- gam(n_pounds ~ s(time, by = subjectID_F) + subjectID_F, 
-                data = detseq_o2[detseq_o2$item == "almendrabrown",], family = "poisson", method = "REML")
-summary(dev_gam2)
-draw(dev_gam2)
-plot(dev_gam2)
-
-# BRMS
-dev_gam2b <- brm(n_pounds ~ s(time, by = subjectID_F) + subjectID_F, data=detseq_o2[detseq_o2$item == "almendrabrown",], family="poisson", 
-                 chains=2, cores = 2, backend = "cmdstanr", save_pars = save_pars(all = TRUE),
-                 iter = 2000)
-# dev_gam2b <- add_criterion(dev_gam2b, c("loo", "loo_R2", "bayes_R2"), reloo = TRUE, backend = "cmdstanr", ndraws = 2000) 
-
-# saving and loading model
-# saveRDS(dev_gam2b, "detailedtools/RDS/dev_gam2b.rds")
-# dev_gam2b <- readRDS("detailedtools/RDS/dev_gam2b.rds")
-plot(conditional_smooths(dev_gam2b))
-plot(conditional_effects(dev_gam2b))
+loo(dev_m1) # all good
+loo_R2(dev_m1) # 0.18
+round(bayes_R2(dev_m1),2) # 0.18
 
 ###### Old age cut-off? ######
 # do we see ABE use tools at all in this dataset?
@@ -890,6 +1044,36 @@ ftable(socialattentioners)
 # Fixed effects: age of the tool user, age-sex of the observer, total number of capuchins present, location, total number of scroungers
 # Random effect: sequenceID (to account for repeated rows per sequence)
 # Offset of log(sequence duration) reflecting opportunity (longer sequences mean more chances for social attention)
+
+######### GOT UNTIL HERE NOW THERE ARE ISSUES #### 
+
+# prior predictive simulation
+# compare default brms prior to what we want to set
+socatt_prior <- brm(socatt ~ tooluser_age + observer_agesex + location + p_total + n_scr + (1|sequenceID) + offset(log(seqduration)),
+                  data = socatt_final, family = bernoulli(),iter = 1000, chains=2,
+                  prior = normal_prior4, sample_prior = "only")
+get_prior
+
+model <- bf(socatt ~ tooluser_age + observer_agesex + location + p_total + n_scr + (1|sequenceID) + offset(log(seqduration)))
+get_prior(model, socatt_final)
+summary(m_e2_prior)
+prior_summary(m_e2_prior)
+mcmc_plot(m_e2_prior)
+plot(m_e2_prior)
+
+# our prior (with normal (0,1) instead of flat prior. 
+m_e2_prior2 <-  brm(n_pounds ~ Age + item + anviltype + (1|subjectID), data = detseq_oi, family = "poisson",
+                    iter = 1000, chain = 2, core = 2, backend = "cmdstanr", 
+                    prior = normal_prior, sample_prior = "only")
+
+summary(m_e2_prior2)
+prior_summary(m_e2_prior2)
+mcmc_plot(m_e2_prior2)
+plot(m_e2_prior2)
+
+# use our priors
+
+
 socatt_bm1 <- brm(socatt ~ tooluser_age + observer_agesex + location + p_total + n_scr + (1|sequenceID) + offset(log(seqduration)),
                   data = socatt_final, family = bernoulli(),
                   iter = 2000, chains=2, cores = 2, backend = "cmdstanr", save_pars = save_pars(all = TRUE))
