@@ -216,7 +216,7 @@ brms_default2 <- c(prior(student_t(3, -2.3, 2.5), class = Intercept),
 
 # brms default for bernoulli
 brms_default3 <- c(prior(student_t(3, 0, 2.5), class = Intercept),
-                  prior(student_t(3, 0, 2.5), class = sd),
+                  prior(student_t(3, 0, 2.5), lb = 0, class = sd),
                   prior(normal(0, 99999), class = b)) #flat prior
 
 # our prior for poisson
@@ -234,16 +234,9 @@ normal_prior3 <- c(prior(normal(0, 1), class = Intercept),
 
 # prior for bernoulli models on social attention
 normal_prior4 <- c(prior(normal(0,1), class = b),
-                   prior(normal(0,1), class = b, coef = "locationEXPMANVM01"),
-                   prior(normal(0,1), class = b, coef = "n_scr"),
-                   prior(normal(0,1), class = b, coef = "observer_agesexadultfemale"),
-                   prior(normal(0,1), class = b, coef = "observer_agesexadultmale"),
-                   prior(normal(0,1), class = b, coef = "observer_agesexsubadultmale"),
-                   prior(normal(0,1), class = b, coef = "p_total"),
-                   prior(normal(0,1), class = b, coef = "tooluser_ageAdult"),
-                   prior(normal(0,1), class = b, coef = "tooluser_ageSubadult"),
                    prior(normal(0,1), class = Intercept),
-                   prior(exp(1), class = sd))
+                   prior(normal(0,1), class = sd, lb = 0))
+
 
 
 
@@ -1045,39 +1038,32 @@ ftable(socialattentioners)
 # Random effect: sequenceID (to account for repeated rows per sequence)
 # Offset of log(sequence duration) reflecting opportunity (longer sequences mean more chances for social attention)
 
-######### GOT UNTIL HERE NOW THERE ARE ISSUES #### 
-
 # prior predictive simulation
 # compare default brms prior to what we want to set
 socatt_prior <- brm(socatt ~ tooluser_age + observer_agesex + location + p_total + n_scr + (1|sequenceID) + offset(log(seqduration)),
-                  data = socatt_final, family = bernoulli(),iter = 1000, chains=2,
-                  prior = normal_prior4, sample_prior = "only")
-get_prior
+                  data = socatt_final, family = bernoulli(),iter = 2000, chains=2,
+                  prior = brms_default3, sample_prior = "only")
 
-model <- bf(socatt ~ tooluser_age + observer_agesex + location + p_total + n_scr + (1|sequenceID) + offset(log(seqduration)))
-get_prior(model, socatt_final)
-summary(m_e2_prior)
-prior_summary(m_e2_prior)
-mcmc_plot(m_e2_prior)
-plot(m_e2_prior)
+summary(socatt_prior)
+prior_summary(socatt_prior)
+mcmc_plot(socatt_prior)
+plot(socatt_prior)
 
 # our prior (with normal (0,1) instead of flat prior. 
-m_e2_prior2 <-  brm(n_pounds ~ Age + item + anviltype + (1|subjectID), data = detseq_oi, family = "poisson",
-                    iter = 1000, chain = 2, core = 2, backend = "cmdstanr", 
-                    prior = normal_prior, sample_prior = "only")
+socatt_prior2 <-  brm(socatt ~ tooluser_age + observer_agesex + location + p_total + n_scr + (1|sequenceID) + offset(log(seqduration)),
+                    data = socatt_final, family = bernoulli(),iter = 1000, chains=2,
+                    prior = normal_prior4, sample_prior = "only")
 
-summary(m_e2_prior2)
-prior_summary(m_e2_prior2)
-mcmc_plot(m_e2_prior2)
-plot(m_e2_prior2)
+summary(socatt_prior2)
+prior_summary(socatt_prior2)
+mcmc_plot(socatt_prior2)
+plot(socatt_prior2)
 
-# use our priors
-
-
+# use our priors as they are not so flat
 socatt_bm1 <- brm(socatt ~ tooluser_age + observer_agesex + location + p_total + n_scr + (1|sequenceID) + offset(log(seqduration)),
-                  data = socatt_final, family = bernoulli(),
-                  iter = 2000, chains=2, cores = 2, backend = "cmdstanr", save_pars = save_pars(all = TRUE))
-# socatt_bm1 <- add_criterion(socatt_bm1, c("loo", "loo_R2", "bayes_R2"), reloo = TRUE, backend = "cmdstanr", ndraws = 2000) 
+                  data = socatt_final, family = bernoulli(), prior = normal_prior4, seed = 12345,
+                  iter = 3000, chains=3, cores = 3, backend = "cmdstanr", save_pars = save_pars(all = TRUE))
+# socatt_bm1 <- add_criterion(socatt_bm1, c("loo", "loo_R2", "bayes_R2"), reloo = TRUE, backend = "cmdstanr", ndraws = 3000) 
 
 # saving and loading model
 # saveRDS(socatt_bm1, "detailedtools/RDS/socatt_bm1.rds")
@@ -1090,16 +1076,35 @@ plot(conditional_effects(socatt_bm1))
 plot(socatt_bm1)
 
 loo(socatt_bm1) # all cases good
-loo_R2(socatt_bm1) # 0.16
-round(bayes_R2(socatt_bm1),2) # 0.33
+loo_R2(socatt_bm1) # 0.30
+round(bayes_R2(socatt_bm1),2) # 0.26
 
+post <- as_draws(socatt_bm1)
+post %>%
+  group_by(b_p_total) %>%
+  mode_hdi() %>%
+  mutate_if(is.double, round, digits = 3)
+mode_hdci(c(post$`1`$b_p_total, post$`2`$b_p_total, post$`3`$b_p_total), width = 0.95, group = "tooluser_age")
+
+head(post$`1`)
 # Interpretation
+logit2prob <- function(logit){
+  odds <- exp(logit)
+  prob <- odds / (1 + odds)
+  return(prob)
+}
+
+logit2prob(-0.38)
+
 ggpredict(socatt_bm1, term = c("tooluser_age"))
-ggpredict(socatt_bm1, term = c("location", "observer_agesex[juvenile]"))
+ggpredict(socatt_bm1, term = c("observer_agesex", "tooluser_age[Adult]"))
+ggpredict(socatt_bm1, term = c("location", "observer_agesex[juvenile]", "tooluser_age[Subadult]"))
+ggpredict(socatt_bm1, term = c("p_total"))
 
 hypothesis(socatt_bm1, "Intercept + itemalmendrared > Intercept", alpha = 0.05)
-hypothesis(socatt_bm1, "Intercept + observer_agesexsubadultmale < Intercept + observer_agesexjuvenile", alpha = 0.05)
-hypothesis(socatt_bm1, "Intercept > Intercept + anviltypewood", alpha = 0.05)
+hypothesis(socatt_bm1, "Intercept + observer_agesexsubadultmale < Intercept", alpha = 0.05)
+hypothesis(socatt_bm1, "Intercept + locationEXPMANVM01 = Intercept", alpha = 0.05)
+hypothesis(socatt_bm1, "p_total < 0")
 
 # Visualization
 socatt_bm1_pred <- socatt_bm1 %>% 
@@ -1174,10 +1179,11 @@ nrow(socatt_finali)
 # Outcome: social attention 1/0
 # Fixed effects: identity of tool user, age of tool user, interaction with n_pounds, agesex of observer, n_mistakes(total)
 # Offset of sequence duration 
+# add same prior as before
 socatt_bm1b <- brm(socatt ~ tooluser_age + n_pounds + observer_agesex + n_misstotal + offset(log(seqduration)) + (1|tooluserID), 
-                   data = socatt_finali, family = bernoulli(),
-                   iter = 2000, chains=2, cores = 4, backend = "cmdstanr", save_pars = save_pars(all = TRUE))
-# socatt_bm1b <- add_criterion(socatt_bm1b, c("loo", "loo_R2", "bayes_R2"), reloo = TRUE, backend = "cmdstanr", ndraws = 2000) 
+                   data = socatt_finali, family = bernoulli(), seed = 12340, prior = normal_prior4, control = list(adapt_delta = 0.99),
+                   iter = 3000, chains=3, cores = 4, backend = "cmdstanr", save_pars = save_pars(all = TRUE))
+# socatt_bm1b <- add_criterion(socatt_bm1b, c("loo", "loo_R2", "bayes_R2"), reloo = TRUE, backend = "cmdstanr", ndraws = 3000) 
 
 # saving and loading model
 # saveRDS(socatt_bm1b, "detailedtools/RDS/socatt_bm1b.rds")
@@ -1189,11 +1195,11 @@ mcmc_plot(socatt_bm1b)
 plot(conditional_effects(socatt_bm1b, re_formula = NULL))
 
 loo(socatt_bm1b) # all cases good
-loo_R2(socatt_bm1b) # 0.04
-round(bayes_R2(socatt_bm1b),2) # 0.09
+loo_R2(socatt_bm1b) # 0.06
+round(bayes_R2(socatt_bm1b),2) # 0.08
 
-hypothesis(socatt_bm1b, "Intercept  > Intercept + n_pounds", alpha = 0.05)
-ggpredict(socatt_bm1b, term = c("n_pounds"), bias_correction = TRUE)
+hypothesis(socatt_bm1b, "Intercept + tooluser_ageSubadult  > Intercept + tooluser_ageSubadult + n_pounds", alpha = 0.05)
+ggpredict(socatt_bm1b, term = c("n_pounds", "tooluser_age[Subadult]"), bias_correction = TRUE)
 
 # Visualization
 socatt_bm1b_pred <- socatt_bm1b %>% 
@@ -1226,6 +1232,6 @@ ggplot(data = socatt_bm1b_pred, aes(x = tooluserID, y = .epred)) + geom_violin(a
                      axis.title = element_text(size = 14)) + theme(axis.text.x = element_text(angle =45, hjust = 1))
 # dev.off()
 
-# consider doing a GAM with social attention depending on hour of the day?
-# might be non-linear relationship?
-
+# png("detailedtools/RDS/socatt_eff.png", width = 8, height = 7, units = 'in', res = 300)
+plot(ggpredict(socatt_bm1b, terms = c("n_pounds", "tooluser_age", "observer_agesex"))) + labs(x = "Number of pounds", y = "Predicted probability of social attention", title = "Age-sex class of observer")
+#dev.off()
