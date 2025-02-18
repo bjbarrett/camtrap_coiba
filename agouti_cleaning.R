@@ -683,3 +683,8 @@ saveRDS(agoutiselect2, "agouti_output/agoutiselect2.rds")
 saveRDS(agouticlean, "agouti_output/agouticlean.rds")
 saveRDS(agoutisequence, "agouti_output/agoutisequence.rds")
 saveRDS(agoutisequence_c, "agouti_output/agoutisequence_c.rds")
+
+agoutiselect2 <- readRDS("agouti_output/agoutiselect2.rds")
+agouticlean <- readRDS("agouti_output/agouticlean.rds")
+agoutisequence <- readRDS("agouti_output/agoutisequence.rds")
+agoutisequence_c <- readRDS("agouti_output/agoutisequence_c.rds")
