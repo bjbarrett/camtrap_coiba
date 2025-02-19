@@ -27,6 +27,10 @@ library(bisonR)
 library(hms)
 library(tidyverse)
 library(oneinfl)
+library(tidybayes)
+library(emmeans)
+library(broom)
+library(broom.mixed)
 
 ## Notes for analyses:
 
@@ -65,6 +69,7 @@ hist(gridsequence_c[which(gridsequence_c$capuchin == 1),]$hour)
 # filter down to only capuchin detections
 gridseq_oc <- gridsequence_c[gridsequence_c$capuchin == 1,]
 gridseq_oc$gridtype <- as.factor(gridseq_oc$gridtype)
+gridseq_oc$deplengthhours <- gridseq_oc$dep_length_hours
 gridseq_oc <- droplevels.data.frame(gridseq_oc)
 
 ## Filter out detections of unfamiliar individuals
@@ -347,7 +352,7 @@ oneplot(PP, OIPP, ZTNB, OIZTNB, df = gridseq_ocf)
 summary(OIZTNB)
 signifWald(OIZTNB, "gridtypeTU")
 
-ps_bm1a <- brm(n |trunc(lb = 1) ~ gridtype + (1|locationfactor) + offset(log(dep_length_hours)), data = gridseq_ocf, family = poisson(), iter = 2000, chain = 2, core = 2, backend = "cmdstanr")
+ps_bm1a <- brm(n |trunc(lb = 1) ~ gridtype + (1|locationfactor) + offset(log(deplengthhours)), data = gridseq_ocf, family = poisson(), iter = 2000, chain = 2, core = 2, backend = "cmdstanr")
 #saveRDS(ps_bm1a, "gridanalyses/RDS/ps_bm1a.rds")
 #ps_bm1a <- readRDS("gridanalyses/RDS/ps_bm1a.rds")
 summary(ps_bm1a)
@@ -356,13 +361,122 @@ plot(conditional_effects(ps_bm1a))
 pp_check(ps_bm1a)
 hypothesis(ps_bm1a, "Intercept < Intercept + gridtypeTU")
 
+## Social party size rather than total party size
+gridseq_ocf$partysize <- gridseq_ocf$n - 1
+hist(gridseq_ocf$partysize)
+
+sps_bm1 <-  brm(partysize ~ gridtype + (1|locationfactor) + offset(log(deplengthhours)), data = gridseq_ocf, family = zero_inflated_poisson(), iter = 2000, chain = 2, core = 2, backend = "cmdstanr")
+#saveRDS(sps_bm1, "gridanalyses/RDS/sps_bm1.rds")
+#sps_bm1 <- readRDS("gridanalyses/RDS/sps_bm1.rds")
+summary(sps_bm1)
+plot(sps_bm1)
+plot(conditional_effects(sps_bm1))
+pp_check(sps_bm1)
+hypothesis(sps_bm1, "Intercept > Intercept + gridtypeTU")
+
+sps_bm1a <-  brm(bf(partysize ~ gridtype + (1|locationfactor) + offset(log(deplengthhours)), hu ~ gridtype + (1|locationfactor)), data = gridseq_ocf, family = hurdle_poisson(), iter = 2000, chain = 2, core = 2, backend = "cmdstanr")
+#saveRDS(sps_bm1a, "gridanalyses/RDS/sps_bm1a.rds")
+#sps_bm1a <- readRDS("gridanalyses/RDS/sps_bm1a.rds")
+summary(sps_bm1a)
+plot(sps_bm1a)
+plot(conditional_effects(sps_bm1a))
+pp_check(sps_bm1a)
+hypothesis(sps_bm1a, "Intercept > Intercept + gridtypeTU")
+
+# some interpretation with explanation
+# https://www.andrewheiss.com/blog/2022/05/09/hurdle-lognormal-gaussian-brms/
+tidy(sps_bm1a)
+# probability of a 0 (party of 1) in NTU
+hurdle_intercept <- tidy(sps_bm1a) |> 
+  filter(term == "hu_(Intercept)") |> 
+  pull(estimate)
+plogis(hurdle_intercept)
+# probability of a 0 (party of 1) in TU
+hurdle_TU <- tidy(sps_bm1a) |>
+  filter(term == "hu_gridtypeTU") |>
+  pull(estimate)
+
+(plogis(hurdle_intercept + hurdle_TU) - plogis(hurdle_intercept)) * 100
+# tool using group increases probability of a 0 (party of 1) by 2.03 percentage points, on average
+
+# conditional effects of 0/not 0 
+plot(conditional_effects(sps_bm1a, dpar = "hu"))
+plot(conditional_effects(sps_bm1a, dpar = "mu"))
+# okay so see here clearly that at TU we are more likely to see a party of 1, and at NTU we see larger parties if it is not party of 1
+# and all together also slightly more likely to have larger party at NTU
+
+# using emmeans to extract estimates on real scale
+# only non-zero mu part
+emmeans(sps_bm1a, "gridtype", dpar = "hu", regrid = "response")
+emmeans(sps_bm1a, "gridtype", dpar = "mu", regrid = "response")
+emmeans(sps_bm1a, "gridtype", regrid = "response")
+
+
 ###### 2. Does the number of capuchins per sequence fluctuate depending on the hour of day, and does this relationship differ between TU and NTU ####
-ggplot(data = gridseq_ocf, aes( x= hour, y = n, col = gridtype, shape = rgidtype)) + geom_point(alpha = 0.5, aes(shape = gridtype)) + geom_smooth()
-ggplot(data = gridseq_ocf, aes( x= seqday, y = n, col = gridtype)) + geom_point() + geom_smooth()
+ggplot(data = gridseq_ocf, aes( x= hour, y = n, col = gridtype, shape = gridtype)) + geom_point(alpha = 0.5, aes(shape = gridtype)) + geom_smooth()
+ggplot(data = gridseq_ocf, aes( x= seqday, y = n, col = gridtype)) + geom_point(alpha = 0.5,) + geom_smooth() + facet_wrap(~gridtype)
+
+ggplot(data = gridseq_ocf[gridseq_ocf$gridtype == "TU",], aes( x= hour, y = n, col = day(seqday))) + geom_point(alpha = 0.5) + facet_wrap(~month) + scale_colour_viridis_c() 
+ggplot(data = gridseq_ocf[gridseq_ocf$gridtype == "NTU",], aes( x= hour, y = n, col = day(seqday))) + geom_point(alpha = 0.5) + facet_wrap(~month) + scale_colour_viridis_c() 
+
+head(gridseq_ocf)
+
+# hurdle gam?
+sps_bm2 <- brm(bf(partysize ~ s(hour, by = gridtype) + gridtype +  s(locationfactor, bs = "re") + offset(log(deplengthhours)), hu ~ gridtype + s(locationfactor, bs = "re")), 
+               data = gridseq_ocf, family = hurdle_poisson(), iter = 2000, chain = 2, core = 2, backend = "cmdstanr")
+#saveRDS(sps_bm2, "gridanalyses/RDS/sps_bm2.rds")
+#sps_bm1 <- readRDS("gridanalyses/RDS/sps_bm2.rds")
+summary(sps_bm2)
+plot(conditional_smooths(sps_bm2))
+plot(conditional_effects(sps_bm2))
+pp_check(sps_bm2)
+
+tidy(sps_bm2)
+# probability of a 0 (party of 1) in NTU
+hurdle_intercept <- tidy(sps_bm2) |> 
+  filter(term == "hu_(Intercept)") |> 
+  pull(estimate)
+plogis(hurdle_intercept)
+# probability of a 0 (party of 1) in TU
+hurdle_TU <- tidy(sps_bm2) |>
+  filter(term == "hu_gridtypeTU") |>
+  pull(estimate)
+
+(plogis(hurdle_intercept + hurdle_TU) - plogis(hurdle_intercept)) * 100
+# tool using group increases probability of a 0 (party of 1) by 1.98 percentage points, on average
+
+## # https://www.andrewheiss.com/blog/2022/05/09/hurdle-lognormal-gaussian-brms/
+# still make plots like on that website with the increase/change over time?
+
+# hurdle gam not hour of day but continuous seqtime. 
+gridseq_ocf$time <- as.numeric(gridseq_ocf$seq_start)/1000
+sps_bm3 <- brm(bf(partysize ~ s(time, by = gridtype) + gridtype +  s(locationfactor, bs = "re") + offset(log(deplengthhours)), hu ~ gridtype + s(locationfactor, bs = "re")), 
+               data = gridseq_ocf, family = hurdle_poisson(), iter = 2000, chain = 2, core = 2, backend = "cmdstanr")
+#saveRDS(sps_bm3, "gridanalyses/RDS/sps_bm3.rds")
+#sps_bm3 <- readRDS("gridanalyses/RDS/sps_bm3.rds")
+summary(sps_bm3)
+plot(conditional_smooths(sps_bm3))
+plot(conditional_effects(sps_bm3))
+pp_check(sps_bm3)
+
+tidy(sps_bm2)
+# probability of a 0 (party of 1) in NTU
+hurdle_intercept <- tidy(sps_bm2) |> 
+  filter(term == "hu_(Intercept)") |> 
+  pull(estimate)
+plogis(hurdle_intercept)
+# probability of a 0 (party of 1) in TU
+hurdle_TU <- tidy(sps_bm2) |>
+  filter(term == "hu_gridtypeTU") |>
+  pull(estimate)
+
+(plogis(hurdle_intercept + hurdle_TU) - plogis(hurdle_intercept)) * 100
+# tool using group increases probability of a 0 (party of 1) by 1.98 percentage points, on average
+
 
 # use a GAM
 ## hour of day is not cyclic spline, as we have no observations at midnight and early in morning for the NTU (explained in bottom of the heap youtube) (but we do at TU?)
-grid_gam1 <- gam(n ~ s(hour, by = gridtype) + gridtype, offset = log(dep_length_hours), data = gridseq_ocf, method = "REML", family = poisson())
+grid_gam1 <- gam(n ~ s(hour, by = gridtype) + gridtype, offset = log(deplengthhours), data = gridseq_ocf, method = "REML", family = poisson())
 
 summary(grid_gam1)
 draw(grid_gam1)
@@ -377,7 +491,7 @@ gam.check(grid_gam1)
 # maybe we should include the 0s too? 
 
 # including locationfactor as a random effect
-grid_gam2 <- gam(n ~ s(hour, by = gridtype) + gridtype +  s(locationfactor, bs = "re"), offset = log(dep_length_hours), data = gridseq_ocf, method = "REML", family = negbin())
+grid_gam2 <- gam(n ~ s(hour, by = gridtype) + gridtype +  s(locationfactor, bs = "re"), offset = log(deplengthhours), data = gridseq_ocf, method = "REML", family = negbin())
 
 summary(grid_gam2)
 draw(grid_gam2)
@@ -391,7 +505,7 @@ plot(grid_gam2, all.terms=TRUE, rug=TRUE, pages = 1, seWithMean = TRUE, shade = 
 ## brms
 # zero-truncated  negative binomial
 # this makes  sense theoretically but seems to take an eternity to run so I have not yet been able to 
-ps_bm1a <- brm(n |trunc(lb = 1) ~ s(hour, by = gridtype) + gridtype +  s(locationfactor, bs = "re") + offset(log(dep_length_hours)), data = gridseq_ocf, family = negbinomial(), iter = 1000, chain = 2, core = 2, backend = "cmdstanr")
+ps_bm1a <- brm(n |trunc(lb = 1) ~ s(hour, by = gridtype) + gridtype +  s(locationfactor, bs = "re") + offset(log(deplengthhours)), data = gridseq_ocf, family = negbinomial(), iter = 1000, chain = 2, core = 2, backend = "cmdstanr")
 #saveRDS(ps_bm1, "gridanalyses/RDS/ps_bm1.rds")
 #ps_bm1 <- readRDS("gridanalyses/RDS/ps_bm1.rds")
 summary(ps_bm1a)
@@ -402,7 +516,7 @@ pp_check(ps_bm1)
 
 # zero-truncated poisson
 ## STILL RE-RUN WITH UNFAMILIARS FILTERED OUT
-ps_bm1 <- brm(n |trunc(lb = 1) ~ s(hour, by = gridtype) + gridtype +  s(locationfactor, bs = "re") + offset(log(dep_length_hours)), data = gridseq_ocf, family = poisson(),  control = list(adapt_delta = 0.9), iter = 2000, chain = 2, core = 2, backend = "cmdstanr")
+ps_bm1 <- brm(n |trunc(lb = 1) ~ s(hour, by = gridtype) + gridtype +  s(locationfactor, bs = "re") + offset(log(deplengthhours)), data = gridseq_ocf, family = poisson(),  control = list(adapt_delta = 0.9), iter = 2000, chain = 2, core = 2, backend = "cmdstanr")
 #saveRDS(ps_bm1, "gridanalyses/RDS/ps_bm1.rds")
 #ps_bm1 <- readRDS("gridanalyses/RDS/ps_bm1.rds")
 summary(ps_bm1)
@@ -462,7 +576,7 @@ ggplot() + geom_line(data = partysize_day2$data, aes(x = hour, y = estimate__, c
   coord_cartesian(ylim = c(1,2.5))
 
 # normal poisson
-ps_bm1_p <- brm(n ~ s(hour, by = gridtype) + gridtype +  s(locationfactor, bs = "re") + offset(log(dep_length_hours)), data = gridseq_oc, family = poisson(),  control = list(adapt_delta = 0.9), iter = 2000, chain = 2, core = 2, backend = "cmdstanr")
+ps_bm1_p <- brm(n ~ s(hour, by = gridtype) + gridtype +  s(locationfactor, bs = "re") + offset(log(deplengthhours)), data = gridseq_oc, family = poisson(),  control = list(adapt_delta = 0.9), iter = 2000, chain = 2, core = 2, backend = "cmdstanr")
 summary(ps_bm1_p)
 mcmc_plot(ps_bm1_p)
 plot(conditional_smooths(ps_bm1_p))
@@ -517,16 +631,16 @@ colnames(griddayhour) <- c("dayhour", "uniqueloctag", "n_mean")
 gridselect2$identifier <- paste(gridselect2$uniqueloctag, gridselect2$dayhour, sep = "-")
 grid_dh <- gridselect2[!duplicated(gridselect2$identifier),]
 grid_dh <- left_join(grid_dh, griddayhour, c("uniqueloctag", "dayhour"))
-grid_dh <- grid_dh[,c("locationfactor", "seqday", "hour", "dayhour", "n_mean", "dep_length_hours")]
+grid_dh <- grid_dh[,c("locationfactor", "seqday", "hour", "dayhour", "n_mean", "deplengthhours")]
 grid_dh$gridtype <- factor(ifelse(str_detect(grid_dh$locationfactor, "NTU") == TRUE, "NTU", "TU"))
 grid_dh <- droplevels.data.frame(grid_dh)
 
 
 # add 0's to other dataframe
 gridseq_oc$dayhour <- paste(gridseq_oc$seqday, gridseq_oc$hour, sep = " ")
-grid_dh2 <- gridseq_oc[,c("locationfactor", "seqday", "hour", "dayhour", "n", "dep_length_hours", "gridtype")]
+grid_dh2 <- gridseq_oc[,c("locationfactor", "seqday", "hour", "dayhour", "n", "deplengthhours", "gridtype")]
 grid_dh0 <- grid_dh[grid_dh$n_mean == 0,]
-colnames(grid_dh0) <- c("locationfactor", "seqday", "hour", "dayhour", "n", "dep_length_hours", "gridtype")
+colnames(grid_dh0) <- c("locationfactor", "seqday", "hour", "dayhour", "n", "deplengthhours", "gridtype")
 grid_dht <- rbind(grid_dh0, grid_dh2)
 
 ## exclude night 0's (not night detections!!) between 19 and 5 (this is being quite broad)
@@ -536,7 +650,7 @@ grid_dht[order(grid_dht$locationfactor, grid_dht$seqday, grid_dht$hour),]
 ## STILL NEED TO BE MORE THOROUGH AND CHECK IF THERE'S NOW NO DAYHOUR THAT HAS BOTH A 0 AND A NUMBER (SHOULD NOT HAPPEN)
 
 ## mgcv
-ps_gam1 <- gam(list(n ~ s(hour, by = gridtype) + gridtype + s(locationfactor, bs = "re"), ~ s(hour, by = gridtype) + gridtype + s(locationfactor, bs = "re")), offset = log(dep_length_hours), data = grid_dht, family = ziplss())
+ps_gam1 <- gam(list(n ~ s(hour, by = gridtype) + gridtype + s(locationfactor, bs = "re"), ~ s(hour, by = gridtype) + gridtype + s(locationfactor, bs = "re")), offset = log(deplengthhours), data = grid_dht, family = ziplss())
 summary(ps_gam1)
 plot(ps_gam1)
 
@@ -559,7 +673,7 @@ head(m5_pred)
 
 ## STILL RUN THIS OVERNIGHT? WILL TAKE A WHILE I THINK
 
-ps_bm1b <- brm(n ~ s(hour, by = gridtype) + gridtype + s(locationfactor, bs = "re") + offset(log(dep_length_hours)), data = grid_dht, family = hurdle_poisson(link = "log"),  iter = 2000, chain = 2, core = 2, backend = "cmdstanr")
+ps_bm1b <- brm(n ~ s(hour, by = gridtype) + gridtype + s(locationfactor, bs = "re") + offset(log(deplengthhours)), data = grid_dht, family = hurdle_poisson(link = "log"),  iter = 2000, chain = 2, core = 2, backend = "cmdstanr")
 #saveRDS(ps_bm1b, "gridanalyses/RDS/ps_bm1b.rds")
 ps_bm1b <- readRDS("gridanalyses/RDS/ps_bm1b.rds")
 summary(ps_bm1b)
@@ -582,7 +696,7 @@ ggplot() + geom_line(data = partysize_dayb$data, aes(x = hour, y = log(estimate_
 # try zero-inflated poisson number of adult  females in a sequence (in dataframe only capuchin detections. TU vs NTU)
 # same for adult males
 # then combine the likelihood functions into one model? 
-pc_bm1 <- brm(nAF ~ gridtype + offset(log(dep_length_hours)) + (1|locationfactor), data = gridseq_ocf, family = zero_inflated_poisson(link = "log", link_zi = "logit"), iter = 2000, chain = 2, core = 2, backend = "cmdstanr")
+pc_bm1 <- brm(nAF ~ gridtype + offset(log(deplengthhours)) + (1|locationfactor), data = gridseq_ocf, family = zero_inflated_poisson(link = "log", link_zi = "logit"), iter = 2000, chain = 2, core = 2, backend = "cmdstanr")
 #saveRDS(pc_bm1, "gridanalyses/RDS/pc_bm1.rds")
 #pc_bm1 <- readRDS("gridanalyses/RDS/pc_bm1.rds")
 summary(pc_bm1)
@@ -593,7 +707,7 @@ hypothesis(pc_bm1, "Intercept > Intercept + gridtypeTU")
 # significantly higher number of females per sequence in NTU than TU grid
 
 #males
-pc_bm2 <- brm(nAM ~ gridtype + offset(log(dep_length_hours)) + (1|locationfactor), data = gridseq_ocf, family = zero_inflated_poisson(link = "log", link_zi = "logit"), iter = 2000, chain = 2, core = 2, backend = "cmdstanr")
+pc_bm2 <- brm(nAM ~ gridtype + offset(log(deplengthhours)) + (1|locationfactor), data = gridseq_ocf, family = zero_inflated_poisson(link = "log", link_zi = "logit"), iter = 2000, chain = 2, core = 2, backend = "cmdstanr")
 #saveRDS(pc_bm2, "gridanalyses/RDS/pc_bm2.rds")
 #pc_bm2 <- readRDS("gridanalyses/RDS/pc_bm2.rds")
 plot(conditional_effects(pc_bm2))
@@ -602,7 +716,7 @@ pp_check(pc_bm2)
 # also higher number of males per sequence in NTU than TU grid
 
 #combining?
-pc_bm3 <- brm(nAF ~ gridtype*nAM + offset(log(dep_length_hours)) + (1|locationfactor), data = gridseq_oc, family = zero_inflated_poisson(link = "log", link_zi = "logit"), iter = 2000, chain = 2, core = 2, backend = "cmdstanr")
+pc_bm3 <- brm(nAF ~ gridtype*nAM + offset(log(deplengthhours)) + (1|locationfactor), data = gridseq_oc, family = zero_inflated_poisson(link = "log", link_zi = "logit"), iter = 2000, chain = 2, core = 2, backend = "cmdstanr")
 #saveRDS(pc_bm3, "gridanalyses/RDS/pc_bm3.rds")
 #pc_bm3 <- readRDS("gridanalyses/RDS/pc_bm3.rds")
 plot(conditional_effects(pc_bm3))
