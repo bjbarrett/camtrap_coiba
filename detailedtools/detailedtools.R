@@ -20,19 +20,21 @@ library(data.table)
 # Zoë's csv
 dettools1 <- read.csv("detailedtools/ZGdetailedtoolscoding.csv")
 # Meredith's csv
-dettools2 <- read.csv("detailedtools/EXP-ANV-01-R11_MC.csv")
+dettools2 <- read.csv("detailedtools/EXP-ANV-01-R11_MC_2025-03-03_correctionbyLRZG.csv")
 dettools2$Coder.ID <- "MC"
 # Leonie's csv
 dettools3 <- read.csv("detailedtools/CEBUS-02-R11_R12_2022_EXP-ANV-01_R12_LRdetailedtoolscoding.csv")
 
 # bind all three datasets together (after making sure they have the same number and order of columns)
 # TEMPORARY until we are all on same version
-new_cols <- names(dettools1)[!names(dettools1) %in% names(dettools2)]
-old_cols <- names(dettools2)[!names(dettools2) %in% names(dettools1)]
+new_cols <- names(dettools1)[!names(dettools1) %in% names(dettools3)]
+old_cols <- names(dettools3)[!names(dettools3) %in% names(dettools1)]
+# these are of no importance so filter them out
 
-dettools1 <- dettools1[, !names(dettools1) %in% new_cols] 
-dettools2 <- dettools2[, !names(dettools2) %in% old_cols]
-dettools3 <- dettools3[, !names(dettools3) %in% old_cols]
+dettools1 <- dettools1[, !names(dettools1) %in% c(new_cols, old_cols)] 
+dettools2 <- dettools2[, !names(dettools2) %in% c(new_cols, old_cols)]
+dettools3 <- dettools3[, !names(dettools3) %in% c(new_cols, old_cols)]
+str(dettools3)
 ## END OF TEMPORARY
 
 # for now not 2b in as there are still errors/is incomplete
@@ -132,7 +134,7 @@ hammers$hammerID[! hammers$hammerID %in% c("FRE", "unmarked", "BAM", "PEB", "unk
 # generate lists of blanks that we missed so we can correct them
 blank <- hammers$sequenceID[which(hammers$hammerID == "")]
 blank_videonames_ZG <- unique(dettools_r$videoID[which(dettools_r$sequenceID %in% blank & dettools_r$coder == "ZG")])
-blank_videonames_MKWC <- unique(dettools_r$videoID[which(dettools_r$sequenceID %in% blank & dettools_r$coder == "MKWC")])
+blank_videonames_MKWC <- unique(dettools_r$videoID[which(dettools_r$sequenceID %in% blank & dettools_r$coder == "MC")])
 blank_videonames_LR <- unique(dettools_r$videoID[which(dettools_r$sequenceID %in% blank & dettools_r$coder == "LR")])
 
 seqdat <- left_join(seqdat, hammers, "sequenceID")
@@ -383,7 +385,6 @@ table(dettools_r2$location, dettools_r2$deployment, dettools_r2$coder)
 hist(dettools_r2$n_reposit)
 ftable(dettools_r2$h_startloc)
 ftable(dettools_r2$h_endloc)
-unique(dettools_r2$videoID[which(dettools_r2$h_endloc == "None")])
 ftable(dettools_r2$Sex)
 
 # sequence level dataframe (only for analyzing things like nr of pounds/duration. things that are fixed per sequence)
@@ -402,13 +403,17 @@ detseq$n_pounds[which(detseq$h_startloc == "inhand" | detseq$split == TRUE)] <- 
 # first filter to relevant part of dataset 
 # which is all sequences where there were capuchins present (so not "none" for social attention)
 soc_att <- detseq[detseq$socatt != "None",]
-nas <- soc_att[!complete.cases(soc_att),]
 
 # maybe work with behavior-level dataframe?
 socatt_l <- dettools_r2[which(dettools_r2$sequenceID %in% soc_att$sequenceID),]
 
-# load in social attention coding of these sequences
+# load in social attention coding of these sequences to check if I missed any in coding
 socatt_c <- read.csv("detailedtools/socialattentioncoding.csv")
+socatt_vidnames <- soc_att[,c("videoID", "coder", "subjectID", "socatt", "scrounging", "displacement")]
+# filter to ones not coded yet
+tocode <- socatt_vidnames[!socatt_vidnames$videoID %in% socatt_c$Observation.id,]
+tocode[0:nrow(tocode),]
+
 # exclude "double" coded sequences where BAL processed two at the same time
 socatt_c <- socatt_c[!str_detect(socatt_c$Observation.id, "double") == TRUE,]
 head(socatt_c)
@@ -419,6 +424,8 @@ socatt_c <- data.frame("videoID" = socatt_c$Observation.id, "codingdate" = socat
                          socatt_c$Coder.ID, "subjectID" = socatt_c$Subject, "behavior" = socatt_c$Behavior,
                        "modifier1" = socatt_c$Modifier..1,  
                        "starttime" = socatt_c$Start..s., "comment" = socatt_c$Comment.start)
+# exclude one where ABE is processing coconut without hammerstone, so no "real" tool use
+socatt_c <- socatt_c[!str_detect(socatt_c$videoID, "coconut") == TRUE,]
 
 # need to assign correct sequence ID to each line.
 socatt_c$sequenceID <- NA
@@ -538,9 +545,9 @@ socatt_seq <- left_join(socatt_seq, scrounger_mod, by = "sequenceID")
 presence <- socatt_ct[socatt_ct$behavior == "present",]
 
 present_as <- as.data.frame(as.matrix(ftable(presence$sequenceID, presence$agesex)))
-colnames(present_as) <- c("p_nAF", "p_nAM", "p_nJM", "p_nJU", "p_nSM", "p_nUU")
+colnames(present_as) <- c("p_nAF", "p_nAM", "p_nJM", "p_nJU", "p_nSM")
 present_as$sequenceID <- rownames(present_as)
-present_as$p_total <- rowSums(present_as[,1:6])
+present_as$p_total <- rowSums(present_as[,1:5])
 present_as$p_nJuveniles <- present_as$p_nJM + present_as$p_nJU
 present_as$p_nAdults <- present_as$p_nAF + present_as$p_nAM
 present_as$p_nSubadults <- present_as$p_nSM
@@ -552,7 +559,7 @@ socatt_seq <- left_join(socatt_seq, present_as, by = "sequenceID")
 socatt_seq <- socatt_seq %>%
   mutate_at(vars("n_socatt", "sa_nAF", "sa_nAM", "sa_nJM", "sa_nJU", "sa_nSM", 
                  "sa_nJuveniles", "sa_nAdults", "sa_nSubadults", "n_disp", "n_scr", "p_nAF",
-                 "p_nAM", "p_nJM", "p_nJU", "p_nSM", "p_nUU", "p_total", "p_nJuveniles",
+                 "p_nAM", "p_nJM", "p_nJU", "p_nSM", "p_total", "p_nJuveniles",
                  "p_nAdults", "p_nSubadults", "aft_scrounge", "tol_scrounge", "steal_scrounge"), ~replace_na(.,0))
 
 ### Datasets we are now left with ####
@@ -596,7 +603,7 @@ socatt_seq <- socatt_seq[,c("videoID", "codingdate", "medianame", "videolength",
                             "n_disp", "n_scr", "p_total", "socatt_ID1", "socatt_ID2", "socatt_ID3", "sa_nAF",
                             "sa_nAM", "sa_nJU", "sa_nSM", "sa_nJuveniles","sa_nAdults", "sa_nSubadults", "disp_ID1",
                             "disp_ID2", "scr_ID1", "scr_ID2", "scr_ID3", "scr_ID4", "p_nAF", "p_nAM", "p_nJM",
-                            "p_nJU", "p_nSM", "p_nUU", "p_nJuveniles","p_nJuveniles", "p_nAdults", "p_nSubadults",
+                            "p_nJU", "p_nSM", "p_nJuveniles","p_nJuveniles", "p_nAdults", "p_nSubadults",
                             "aft_scrounge", "tol_scrounge", "steal_scrounge")]
 #saveRDS(socatt_seq, "detailedtools/RDS/socatt_seq.rds")
 

@@ -39,6 +39,7 @@ head(dettools_r2)
 nrow(detseq)
 ftable(detseq$item)
 ftable(detseq$outcome)
+ftable(detseq$outcome, detseq$Age)
 ftable(detseq$subjectID)
 mean(ftable(detseq$mediadate))
 length(unique(detseq$mediadate))
@@ -87,14 +88,6 @@ detseq_oi$Age <- factor(detseq_oi$Age, levels = c("Juvenile", "Subadult", "Adult
 
 
 ## Social attention ##
-## TEMPORARY CHECK WHAT STILL TO CODE
-soc_att <- detseq[!detseq$socatt == "None",]
-socatt_vidnames <- soc_att[,c("videoID", "coder", "subjectID", "socatt", "scrounging", "displacement")]
-# filter to ones not coded yet
-# load in coding
-socatt_c <- read.csv("detailedtools/socialattentioncoding.csv")
-tocode <- socatt_vidnames[!socatt_vidnames$videoID %in% socatt_c$Observation.id,]
-tocode[0:nrow(tocode),]
 
 ## social attention coding dataframes, two levels
 head(socatt_seq) # aggregated to sequence
