@@ -72,13 +72,13 @@ table(detseq_o$location, detseq_o$deployment)
 ftable(detseq_o$subjectID) # for vast majority of sequences we can identify the tool user
 ftable(detseq_o$Age) # most sequences are by subadults, but good range of the different age classes
 nrow(detseq_o)
-# so at the moment have 3203 sequences
+# so at the moment have 3196 sequences
 
 # subset to the best of the best: known individuals, and no split videos
 # Split videos (spanning several videos) likely miss pounds, and as such are not reliable measures of efficiency
-ftable(detseq_o$split) # exclude 254 split sequences 
-ftable(detseq_o$subjectID) # exclude 59 not ID'd sequences 
-detseq_oi <- detseq_o[!detseq_o$subjectID %in% c("adultmale", "subadultmale", "juvenileunknown") & detseq_o$split == FALSE,]
+ftable(detseq_o$split) # exclude 253 split sequences 
+ftable(detseq_o$subjectID) # exclude 43 not ID'd sequences 
+detseq_oi <- detseq_o[!detseq_o$subjectID %in% c("subadultmale", "juvenileunknown") & detseq_o$split == FALSE,]
 nrow(detseq_oi)
 ftable(detseq_oi$Age)
 # then end up with 2890 sequences
@@ -124,7 +124,7 @@ for(i in 1:length(socsequences)){
 socatt_final <- socatt_final[order(socatt_final$sequenceID),]
 # in this sample, we have:
 length(unique(socatt_final$sequenceID))
-# 992 sequences with capuchins present
+# 991 sequences with capuchins present
 # now attach the relevant information from the main dataframe (information on the tool user etc)
 head(detseq)
 detseq$socialattention <- detseq$socatt
@@ -144,7 +144,7 @@ socatt_final <- left_join(socatt_final, socatt_seq[,c("sequenceID", "n_socatt", 
 # CHECK IF SCORUNGING/DISPLACEMENT/SOCATT TRACKED
 table(socatt_final$socialattention, socatt_final$n_socatt)
 # generate list of incongruities to fix
-checklist <- unique(socatt_final$sequenceID[socatt_final$n_disp == 0 & socatt_final$displacement == "fulldisp"| 
+checklist <- unique(socatt_final$videoID[socatt_final$n_disp == 0 & socatt_final$displacement == "fulldisp"| 
                                              socatt_final$n_disp > 0 & socatt_final$displacement == "None" |
                                              socatt_final$n_disp >0 & socatt_final$displacement == "nodisplacement"|
                                        socatt_final$n_scr == 0 & socatt_final$scrounging == "scrounging" |
@@ -155,6 +155,7 @@ checklist <- unique(socatt_final$sequenceID[socatt_final$n_disp == 0 & socatt_fi
 # check the checklist files, first in the social attention coding to see if that is correct
 # if that is correct, then these need to be changed in the original BORIS coding
 # change the ones I can, and have Leonie changes the ones in her and Meredith's coding
+# but is not an issue for analyses now
 #############################
 
 # clean up the final dataframe
@@ -190,9 +191,9 @@ table(socatt_final$socialattention[!duplicated(socatt_final$sequenceID)],
 # therefore are not sure who was present/who paid attention
 
 # exclude these sequences
-socatt_final <- socatt_final[socatt_final$split == FALSE & !socatt_final$observer_agesex == "unknown" &
+socatt_final <- socatt_final[socatt_final$split == FALSE &
                                !socatt_final$outcome == "None" & !socatt_final$outcome == "Unknown",]
-# then have 839 sequences
+# then have 844 sequences
 length(unique(socatt_final$sequenceID))
 
 ### PRIORS ####
@@ -263,7 +264,7 @@ plot(testdist1.2)
 # prior predictive simulation
 # compare default brms prior to what we want to set
 m_e1_prior <- brm(seqduration ~ Age + item + anviltype + (1|subjectID), data = detseq_oi, iter = 1000, 
-                  chain = 2, core = 2, backend = "cmdstanr", 
+                  chain = 2, core = 2, backend = "cmdstanr", control = list(adapt_delta = 0.99),
                   family = "gamma", prior = brms_default, sample_prior = "only")
 
 summary(m_e1_prior)
@@ -274,7 +275,7 @@ plot(m_e1_prior)
 
 # our prior (with normal (0,1) instead of flat prior. 
 m_e1_prior2 <-  brm(seqduration ~ Age + item + anviltype + (1|subjectID), data = detseq_oi, iter = 1000, 
-                    chain = 2, core = 2, backend = "cmdstanr", 
+                    chain = 2, core = 2, backend = "cmdstanr", control = list(adapt_delta = 0.99),
                     family = "gamma", prior = normal_prior, sample_prior = "only")
 
 summary(m_e1_prior2)
@@ -305,7 +306,7 @@ round(bayes_R2(m_e1),2) # 0.23
 plot(m_e1$criteria$loo, label_points = TRUE)
 
 # Interpretation
-round(c(exp(0.48), exp(0.48), exp(0.48)),2)
+round(c(exp(0.4), exp(0.29), exp(0.5)),2)
 
 hypothesis(m_e1, "Intercept  > Intercept + AgeSubadult", alpha = 0.05)
 hypothesis(m_e1, "Intercept  > Intercept + AgeAdult", alpha = 0.05)
@@ -402,9 +403,10 @@ loo_R2(m_e2) # 0.12
 round(bayes_R2(m_e2),2) # 0.12
 
 # Interpretation
-round(c(exp(0.08), exp(0.05), exp(0.12)),2)
-hypothesis(m_e2, "Intercept + itemalmendragreen > Intercept", alpha = 0.05)
-hypothesis(m_e2, "Intercept > Intercept + AgeAdult", alpha = 0.05)
+round(c(exp(0.09), exp(0.06), exp(0.13)),2)
+hypothesis(m_e2, "Intercept + itemalmendrared > Intercept", alpha = 0.05)
+hypothesis(m_e2, "Intercept > Intercept + AgeSubadult", alpha = 0.05)
+hypothesis(m_e2, "Intercept + AgeAdult > Intercept + AgeSubadult", alpha = 0.05)
 hypothesis(m_e2, "Intercept > Intercept + anviltypewood", alpha = 0.05)
 
 # Visualization
@@ -447,7 +449,7 @@ ggplot(detseq_oi, aes(y = seqduration, x = n_pounds, color = Age, shape = Age)) 
   scale_color_viridis_d(option = "plasma", end = 0.8) +
   labs(y = "Seconds needed to open item", x = "Number of pounds needed to open item") +
   theme_bw() + theme(axis.text = element_text(size = 12),
-                     axis.title = element_text(size = 14)) + facet_wrap(~Age)
+                     axis.title = element_text(size = 14))
 # dev.off()
 
 # formal model, m_e2 but with offset of sequence duration
@@ -471,10 +473,10 @@ loo_R2(m_e2b) # 0.40
 round(bayes_R2(m_e2b),2) # 0.69
 
 # Interpretation
-round(c(exp(-1.30), exp(-1.46), exp(-1.15)),2)
-hypothesis(m_e2, "Intercept + itemalmendragreen > Intercept", alpha = 0.05)
-hypothesis(m_e2, "Intercept > Intercept + AgeAdult", alpha = 0.05)
-hypothesis(m_e2, "Intercept > Intercept + anviltypewood", alpha = 0.05)
+round(c(exp(-0.3), exp(-0.49), exp(-0.12)),2)
+hypothesis(m_e2b, "Intercept + itemalmendragreen > Intercept", alpha = 0.05)
+hypothesis(m_e2b, "Intercept < Intercept + AgeSubadult", alpha = 0.05)
+hypothesis(m_e2b, "Intercept > Intercept + anviltypewood", alpha = 0.05)
 
 ##### 3. Number of repositions and peels ######
 
@@ -521,7 +523,7 @@ round(loo_R2(m_e3a),2) # 0.15
 round(bayes_R2(m_e3a),2) # 0.17 
 
 # Interpretation
-round(c(exp(0.07-1.22), exp(0.07-1.97), exp(0.07-0.32)),2)
+round(c(exp(0.10-1.24), exp(0.10-2.03), exp(0.10-0.34)),2)
 hypothesis(m_e3a, "Intercept > Intercept + AgeAdult", alpha = 0.05)
 hypothesis(m_e3a, "Intercept > Intercept + AgeSubadult", alpha = 0.05)
 
@@ -567,7 +569,7 @@ plot(m_e3b_prior2)
 
 # use our normal(0,1) prior instead of default brms
 m_e3b <- brm(n_peel ~ Age + item + anviltype + (1|subjectID), data = detseq_oi,
-             save_pars = save_pars(all = TRUE), family = "poisson", iter = 3000,
+             save_pars = save_pars(all = TRUE), family = "poisson", iter = 3000, control = list(adapt_delta = 0.99),
              chain = 3, core = 3, backend = "cmdstanr", seed = 12345, prior = normal_prior)
 # m_e3b <- add_criterion(m_e3b, c("loo", "loo_R2", "bayes_R2"), reloo = TRUE, backend = "cmdstanr", ndraws = 3000) 
 
@@ -583,10 +585,10 @@ plot(conditional_effects(m_e3b))
 
 loo(m_e3b) # all cases good
 round(loo_R2(m_e3b),2) # 0.11
-round(bayes_R2(m_e3b),2) # 0.11 
+round(bayes_R2(m_e3b),2) # 0.12
 
 # Interpretation
-round(c(exp(0.35), exp(0.18), exp(0.51)),2)
+round(c(exp(0.39), exp(0.21), exp(0.56)),2)
 hypothesis(m_e3b, "Intercept > Intercept + AgeAdult", alpha = 0.05)
 hypothesis(m_e3b, "Intercept + itemalmendragreen > Intercept", alpha = 0.05)
 
@@ -615,7 +617,7 @@ table(detseq_oi$n_flies, detseq_oi$Age)
 ftable(detseq_oi$n_hloss, detseq_oi$Age)
 # in all cases mistakes are very rare, so these models are heavily zero-inflated
 ftable(detseq_oi$n_misstotal)
-sum(detseq_oi$n_misstotal)
+sum(detseq_oi$n_hloss)
 
 # anvil type could play a big role here, with items being more likely to fly off on some material
 t.test(detseq_oi$n_flies ~ as.factor(detseq_oi$anviltype))
@@ -671,8 +673,8 @@ loo_R2(m_e4a) # 0.20
 round(bayes_R2(m_e4a),2) # 0.16
 
 # Interpretation
-round(exp(-1.93+0.88),2) * 0.48
-hypothesis(m_e4a, "Intercept > Intercept + AgeAdult", alpha = 0.05)
+round(c(exp(-1.97-0.79), exp(-1.97-2.45), exp(-1.97+0.92)),2)
+hypothesis(m_e4a, "Intercept > Intercept + AgeSubadult", alpha = 0.05)
 
 # make violin plot
 m_type_pred4 <- m_e4a %>% 
@@ -737,8 +739,8 @@ loo_R2(m_e4b) # 0.12
 round(bayes_R2(m_e4b),2) # 0.11
 
 # Interpretation
-round(exp(1.56),2) * 0.42
-hypothesis(m_e4b, "Intercept > Intercept + AgeAdult", alpha = 0.05)
+round(c(exp(0.9), exp(0.24), exp(1.53)),2)
+hypothesis(m_e4b, "Intercept > Intercept + AgeSubadult", alpha = 0.05)
 hypothesis(m_e4b, "Intercept > Intercept + anviltypewood", alpha = 0.05)
 hypothesis(m_e4b, "Intercept + itemalmendragreen > Intercept", alpha = 0.05)
 hypothesis(m_e4b, "Intercept  + itemalmendrared > Intercept", alpha = 0.05)
@@ -971,6 +973,7 @@ ftable(detseq$subjectID)
 # we don't see ABE use tools in this dataset at all
 
 # does ABE use tools in old data? 
+# need to first load old data from other script
 ABE_only <- subset(agouticlean, agouticlean$name == "ABE (Abraham)")
 ftable(ABE_only$tooluse) # 73 instances of tool use
 plot(ABE_only$seq_start, ABE_only$tooluse)
@@ -982,7 +985,7 @@ ABEcomment <- dettools_r2[str_detect(dettools_r2$comment, "ABE|Abraham"),]
 displacers <- append(socatt_seq$disp_ID1, socatt_seq$disp_ID2)
 displacers <- displacers[!is.na(displacers)]
 ftable(displacers)
-ftable(socatt_final$n_disp) # 165 total displacements
+sum(socatt_final$n_disp) # 165 total displacements
 ftable(socatt_final$n_scr) # 400 total scrounging events
 
 ###
@@ -1090,12 +1093,13 @@ logit2prob <- function(logit){
 logit2prob(-0.38)
 
 ggpredict(socatt_bm1, term = c("tooluser_age"))
-ggpredict(socatt_bm1, term = c("observer_agesex", "tooluser_age[Adult]"))
+ggpredict(socatt_bm1, term = c("observer_agesex", "tooluser_age[Subadult]"))
 ggpredict(socatt_bm1, term = c("location", "observer_agesex[juvenile]", "tooluser_age[Subadult]"))
 ggpredict(socatt_bm1, term = c("p_total"))
 
 hypothesis(socatt_bm1, "Intercept + itemalmendrared > Intercept", alpha = 0.05)
 hypothesis(socatt_bm1, "Intercept + observer_agesexsubadultmale < Intercept", alpha = 0.05)
+hypothesis(socatt_bm1, "Intercept + tooluser_ageSubadult > Intercept", alpha = 0.05)
 hypothesis(socatt_bm1, "Intercept + locationEXPMANVM01 = Intercept", alpha = 0.05)
 hypothesis(socatt_bm1, "p_total < 0")
 
@@ -1190,7 +1194,6 @@ plot(conditional_effects(socatt_bm1b, re_formula = NULL))
 loo(socatt_bm1b) # all cases good
 loo_R2(socatt_bm1b) # 0.06
 round(bayes_R2(socatt_bm1b),2) # 0.08
-
 hypothesis(socatt_bm1b, "Intercept + tooluser_ageSubadult  > Intercept + tooluser_ageSubadult + n_pounds", alpha = 0.05)
 ggpredict(socatt_bm1b, term = c("n_pounds", "tooluser_age[Subadult]"), bias_correction = TRUE)
 
@@ -1213,8 +1216,10 @@ graphopp_socatt <- graphopp_socatt[sort(graphopp_socatt$Group.1),]
 socatt_idgraph$value <- graphvalues_socatt$x
 socatt_idgraph$opportunity <- graphopp_socatt$x
 
+socatt_bm1b_pred$tooluserID_r <- factor(socatt_bm1b_pred$tooluserID, levels = c("BAL", "JOE", "PEA", "TER", "ZIM", "LAR", "MIC", "SPT", "SMG", "TOM"))
+
 # png("detailedtools/RDS/socatt_ids.png", width = 8, height = 7, units = 'in', res = 300)
-ggplot(data = socatt_bm1b_pred, aes(x = tooluserID, y = .epred)) + geom_violin(aes(color = tooluser_age, fill = tooluser_age), alpha = 0.4) +
+ggplot(data = socatt_bm1b_pred, aes(x = tooluserID_r, y = .epred)) + geom_violin(aes(color = tooluser_age, fill = tooluser_age), alpha = 0.4) +
   stat_summary(socatt_finali, inherit.aes = FALSE, mapping=aes(x = tooluserID, y = socatt, color = tooluser_age), geom = "point", fun = "mean",
                size = 4) + scale_fill_manual(values = cols_obs) + scale_color_manual(values = cols_obs) +
   guides(color = "none") +   
