@@ -31,6 +31,8 @@ library(tidybayes)
 library(emmeans)
 library(broom)
 library(broom.mixed)
+library(mapview)
+library(sf)
 
 ## Notes for analyses:
 
@@ -79,6 +81,17 @@ gridseq_ocf <- gridseq_oc[! gridseq_oc$sequenceID %in% unfamiliars,]
 # how successful were we at assigning IDs and age sex
 ftable(gridseq_ocf$agesex, gridseq_ocf$toolusers)
 ftable(gridseq_ocf$name, gridseq_ocf$toolusers)
+
+# visualize activity at the different cameras
+gridcamerasmap <- as.data.frame(ftable(gridseq_oc$locationName))
+colnames(gridcamerasmap) <- c("locationName", "ncapseq")
+gridcamerasmap <- left_join(gridcamerasmap, gridseq_oc[!duplicated(gridseq_oc$locationName),c("locationName", "longitude", "latitude")], by = "locationName")
+# locations with unfamiliar sightings
+unfamiliarsloc <- gridseq_oc$locationName[which(str_detect(gridseq_oc$comments.x, "unfamiliar") == TRUE)]
+gridcamerasmap$unfamiliar <- ifelse(gridcamerasmap$locationName %in% unfamiliarsloc, 1.2, 1)
+gridcammap <- st_as_sf(gridcamerasmap, coords = c("longitude", "latitude"), crs = 4326)
+
+mapview(gridcammap, zcol = "ncapseq", at = c(0, 50, 100, 200, 300, 400), legend = TRUE)
 
 ###### Exposure, how many trapping nights TU vs NTU ####
 ## How many camera trapping days
@@ -1078,7 +1091,7 @@ hist(cooccurrences_NTU$distcam12)
 # load data in 
 TUdistmat <- readRDS("gridanalyses/RDS/TUdistmat.rds")
 NTUdistmat <- readRDS("gridanalyses/RDS/NTUdistmat.rds")
-gridseq_oc <- readRDS("gridanalyses/RDS/gridseq_oc.rds")
+#gridseq_ocf <- readRDS("gridanalyses/RDS/gridseq_ocf.rds")
 
 dTU <- gridseq_ocf[gridseq_ocf$gridtype == "TU",]
 dTU <- droplevels.data.frame(dTU)
@@ -1158,7 +1171,6 @@ NTUdistmat2 <- round(NTUdistmat/100,2)
 # he uses poisson, if we want poisson too we could do total number of capuchins seen (very crude but ok)
 dTU_total <- aggregate(list(n = dTU$n, seq_length = dTU$seq_length), by = list(camera = dTU$camera, long = dTU$longitude, lat = dTU$latitude,  location = dTU$locationName), FUN = "sum")
 ## add distance to coast per camera
-# only available for Jicaron
 dist2coast_all <- read.csv("tide_analysis/allcams_gps.csv", header = TRUE)
 dist2coast_all <- dist2coast_all[ , c(2,5)]
 
@@ -1198,7 +1210,7 @@ dat_list <- list(
   C = dTU$camera,
   D = TUdistmat2 )
 
-mTdist <- ulam(
+mTdist_TU <- ulam(
   alist(
     N ~ dpois(lambda),
     log(lambda) <- abar + a[C],
@@ -1213,14 +1225,14 @@ mTdist <- ulam(
 #saveRDS(mTdist_TU, "gridanalyses/RDS/mTdist_TU.rds")
 #mTdist_TU <- readRDS("gridanalyses/RDS/mTdist_TU.rds")
 
-precis(mTdist, 2)
+precis(mTdist_TU, 2)
 
 # visualize posterior
-post <- extract.samples(mTdist)
+post <- extract.samples(mTdist_TU)
 
 # plot posterior median covariance function
 plot(NULL, xlab = "distance (hundred m)", ylab = "covariance",
-     xlim = c(0,10), ylim = c(0,2))
+     xlim = c(0,10), ylim = c(0,3))
 
 # compute posterior mean covariance
 x_seq <- seq(from=0, to = 10, length.out = 100)
@@ -1297,7 +1309,7 @@ post2 <- extract.samples(mTdist_TU2)
 
 # plot posterior median covariance function
 plot(NULL, xlab = "distance (hundred m)", ylab = "covariance",
-     xlim = c(0,10), ylim = c(0,2))
+     xlim = c(0,10), ylim = c(0,3))
 
 # prior in black
 for(i in 1:n){

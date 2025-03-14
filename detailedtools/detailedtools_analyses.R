@@ -1006,6 +1006,7 @@ ftable(socatt_final$tooluserID)
 ftable(socatt_final$tooluser_age)
 ftable(socatt_final$observerID)
 ftable(socatt_final$observer_agesex, socatt_final$socatt)
+ftable(socatt_final$location[!duplicated(socatt_final$sequenceID)], socatt_final$socatt[!duplicated(socatt_final$sequenceID)])
 
 # check for NAs
 which(is.na(socatt_final), arr.ind = TRUE)
