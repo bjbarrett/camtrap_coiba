@@ -18,6 +18,11 @@ setwd("~/GitHub/camtrap_coiba") # change to Git
 ## For not finished deployments, all the uncoded sequences are also included (so this also includes 'blank' sequences that haven't been marked as such yet)
 ## Agouti also provides a multimedia file and deployment keys
 
+## Update March 2025. Agouti changed their output, and they now changed "sequenceID" to "eventID". They also have seqend and seqstart in as event end and event start
+# individual ID is now real name not key
+# camera set up is now "setup" or nothing instead of TRUE/FALSE
+
+
 ### TO DO's:
 ## - for known juvenile individuals, need to code which year/deployment they shift to (sub)adult
 ## - for affiliative interactions, how do we know who is grooming (or being friendly) with whom if we've coded more than 2 individuals as grooming?
@@ -25,26 +30,33 @@ setwd("~/GitHub/camtrap_coiba") # change to Git
 #   then see if you have activity at several camera traps within the same hour (hour might be too large of a timescale). Need spatial depth for this. 
 
 # open Agouti output file (observations) that you have downloaded from the agouti website. Use most recent version
-agoutigross <- read.csv("agouti_output/coiba-national-park-tool-use-20230629133316/observations.csv", header = TRUE)
+agoutigross <- read.csv("agouti_output/coiba-national-park-tool-use-20250228090345/observations.csv", header = TRUE)
+# add sequenceID variable (replace eventID)
+agoutigross$sequenceID <- agoutigross$eventID
+# remake camera set up
+agoutigross$cameraSetup <- ifelse(agoutigross$cameraSetupType == "setup", "True", "False")
 
 # open the associated deployment keys (also downloaded from agouti.eu)
-depl_keys <- read.csv("agouti_output/coiba-national-park-tool-use-20230629133316/deployments.csv", header = TRUE)
+depl_keys <- read.csv("agouti_output/coiba-national-park-tool-use-20250228090345/deployments.csv", header = TRUE)
+depl_keys$tags <- depl_keys$deploymentTags
 
 # filter out test deployments/not relevant ones (so create variable to filter test ones)
 ## THIS WILL NEED TO BE MORE FINETUNED LATER. THERE ARE SOME TRIAL/WRONG DATA ON THERE THAT MAY NOT BE CAPTURED NOW.
 # also have "caution" flag for deployments that might need some modification/fixing. 
-depl_keys$flag <- ifelse(grepl("Flag", depl_keys$tags) | grepl("Test", depl_keys$tags) | depl_keys$tags == "", 1, 0 )
+depl_keys$flag <- ifelse(grepl("Flag", depl_keys$deploymentTags) | grepl("Test", depl_keys$deploymentTags) | depl_keys$deploymentTags == "", 1, 0 )
 agoutigross <- left_join(agoutigross, depl_keys, "deploymentID")
 agoutigross <- agoutigross[agoutigross$flag == 0,]
 
 #### Timestamps & Sequence Info #####
 # turn sequence start time into POSIXct format and replace T with a space
-agoutigross$time <- str_replace(agoutigross$timestamp, "T", " ")
+agoutigross$time <- str_replace(agoutigross$eventStart, "T", " ")
 agoutigross$time <- as.POSIXct(agoutigross$time, tz = "America/Panama", format = "%Y-%m-%d %H:%M:%S")
 
 # identify and correct wrong timestamps
 # open the multimedia csv containing the correct timestamps (also from agouti)
-multimedia <- read.csv("agouti_output/coiba-national-park-tool-use-20230629133316/media.csv", header = TRUE)
+multimedia <- read.csv("agouti_output/coiba-national-park-tool-use-20250228090345/media.csv", header = TRUE)
+# now the sequenceID is buried in the mediaComments
+multimedia$sequenceID <- sapply(str_split(multimedia$mediaComments, ":"), '[', 2)
 
 # have both timestamps we entered incorrectly (e.g. 1970) and those that shifted 5 hours by accident
 multimedia$time <- str_replace(multimedia$timestamp, "T", " ")
@@ -109,7 +121,7 @@ agoutigross <- left_join(agoutigross, multimedia2, "sequenceID")
 # rename SURVEY-CEBUS-24-01 to CEBUS-04
 agoutigross$locationName[which(agoutigross$locationName == "SURVEY-CEBUS-24-01")] <- "CEBUS-04"
 # create unique variable (like deployment ID) that is location name + tag
-agoutigross$uniqueloctag <- paste(agoutigross$locationName, agoutigross$tag, sep = "-")
+agoutigross$uniqueloctag <- paste(agoutigross$locationName, agoutigross$tags, sep = "-")
 # remove "caution" from the name and instead create a caution column
 agoutigross$caution <- ifelse(str_detect(agoutigross$uniqueloctag, "-Caution \\| ") == TRUE, 1, 0)
 agoutigross$uniqueloctag <- str_replace(agoutigross$uniqueloctag, "-Caution \\| R", "-")
@@ -134,6 +146,7 @@ agoutigross$season <- ifelse(agoutigross$month == 12 | agoutigross$month == 1 | 
 
 # pull island location and tool use/non tool use from coiba_camtrap_ids_gps.csv
 # take long-lat from coiba_camtrap_ids_gps instead of what we entered on agouti
+setwd("~/GitHub/camtrap_coiba") # change to Git if need be
 deployment_info <- read.csv("coiba_camtrap_ids_gps.csv")
 deployment_info$locationName <- deployment_info$camera_id
 deployment_info <- deployment_info[!deployment_info$locationName == "SURVEY-CEBUS-24-01",] 
@@ -154,7 +167,7 @@ test$mismatch <- ifelse(test$latitudematch == 0 | test$longitudematch == 0, 1, 0
 mismatches <- test[test$latitudematch == 0 | test$longitudematch == 0,]
 
 #ggplot(test[test$mismatch == 1,], aes(label = locationName)) + geom_point(aes(x= longitude.x, y = latitude.x), col = "black") + 
-#  geom_text(aes(x = longitude.x, y = latitude.x), hjust = 0, vjust = 0, col = "black") +
+# geom_text(aes(x = longitude.x, y = latitude.x), hjust = 0, vjust = 0, col = "black") +
 #  coord_cartesian(xlim = c(-81.8225, -81.816), ylim = c(7.266,7.273)) +
 #  geom_point(aes(x = longitude.y, y = latitude.y), col = "red", alpha = 0.5) + geom_text(aes(x = longitude.y, y = latitude.y), hjust = 0, vjust = 0, col = "red") 
 
@@ -175,19 +188,19 @@ agoutigross$lifeStage[which(agoutigross$capuchin == TRUE & agoutigross$lifeStage
 # for now only did this for the ones that we have seen at various lifestages
 # SPT, RIC, INK, LAR, YOD (not coded later yet)
 # need to find their agouti codes
+# with march updates agouti key codes are gone and IDs are in main output
 # SPT = 66437816-fdf4-4fde-9dbd-8591bfe8cb1c
 # LAR = c6114eb1-b53e-4494-9565-0dd621ff88b9
 # YOD = cbf8f2a0-f1ed-425b-9a71-8b59227b5546
 # RIC = 108f3544-b14a-43d9-a3a0-b805f35ae2db
 # INK =  db68538d-ff60-433a-bf94-e9a886a6d23c
-agoutigross$lifeStage <- ifelse(agoutigross$individualID == "66437816-fdf4-4fde-9dbd-8591bfe8cb1c" & year(agoutigross$seq_start) > 2018 & year(agoutigross$seq_start) < 2022, "subadult", 
-                                ifelse(agoutigross$individualID == "66437816-fdf4-4fde-9dbd-8591bfe8cb1c" & year(agoutigross$seq_start) > 2021, "adult",
-                                       ifelse(agoutigross$individualID == "db68538d-ff60-433a-bf94-e9a886a6d23c" & year(agoutigross$seq_start) > 2020, "adult", 
-                                              ifelse(agoutigross$individualID == "c6114eb1-b53e-4494-9565-0dd621ff88b9" & year(agoutigross$seq_start) > 2019 & year(agoutigross$seq_start) < 2022, "subadult",
-                                                     ifelse(agoutigross$individualID == "c6114eb1-b53e-4494-9565-0dd621ff88b9" & year(agoutigross$seq_start) > 2021, "adult", agoutigross$lifeStage)))))
+agoutigross$lifeStage <- ifelse(agoutigross$individualID == "SPT (Spot)" & year(agoutigross$seq_start) > 2018 & year(agoutigross$seq_start) < 2022, "subadult", 
+                                ifelse(agoutigross$individualID == "SPT (Spot)" & year(agoutigross$seq_start) > 2021, "adult",
+                                       ifelse(agoutigross$individualID == "INK (Ink)" & year(agoutigross$seq_start) > 2020, "adult", 
+                                              ifelse(agoutigross$individualID == "LAR (Larry)" & year(agoutigross$seq_start) > 2019 & year(agoutigross$seq_start) < 2022, "subadult",
+                                                     ifelse(agoutigross$individualID == "LAR (Larry)" & year(agoutigross$seq_start) > 2021, "adult", agoutigross$lifeStage)))))
 
 ## CHECK THIS!!
-
 
 # make agesex variable that is paste of sex and life stage
 agoutigross$agesex <- ifelse(agoutigross$capuchin == TRUE, 
@@ -204,10 +217,11 @@ agoutigross <- left_join(agoutigross, cap_numbers, "sequenceID")
 agoutigross$n[is.na(agoutigross$n)] <- 0
 
 ## First add ID string instead of code
-IDS <- read.csv("agouti_output/individual_age_sex_species_202306131450.csv")
-IDS <- IDS[,c("id", "name")]
+# no longer necessary with March 2025 update
+#IDS <- read.csv("agouti_output/individual_age_sex_species_202306131450.csv")
+#IDS <- IDS[,c("id", "name")]
 
-agoutigross <- left_join(agoutigross, IDS, by = c("individualID" = "id"))
+#agoutigross <- left_join(agoutigross, IDS, by = c("individualID" = "id"))
 
 ##### Age/sex classes #####
 # make frequency table of agesex per sequence
@@ -217,8 +231,8 @@ colnames(cap_agesex) <- c("nAF", "nAM", "nAU", "nJF", "nJM", "nJU", "nSF", "nSM"
 cap_agesex$sequenceID <- rownames(cap_agesex)
 
 # number of adult females carrying infant
-cap_agesex_infant <- as.data.frame(as.matrix(ftable(agoutigross_cap$sequenceID[which(str_detect(agoutigross_cap$behaviour, "Infant Care") == TRUE)], 
-                                             agoutigross_cap$agesex[which(str_detect(agoutigross_cap$behaviour, "Infant Care") == TRUE)])))
+cap_agesex_infant <- as.data.frame(as.matrix(ftable(agoutigross_cap$sequenceID[which(str_detect(agoutigross_cap$behavior, "Infant Care") == TRUE)], 
+                                             agoutigross_cap$agesex[which(str_detect(agoutigross_cap$behavior, "Infant Care") == TRUE)])))
 colnames(cap_agesex_infant) <- c("nAF_infant", "nAM_infant", "nAU_infant", "nJF_infant", "nJM_infant", "nJU_infant", "nSF_infant", "nSM_infant", "nSU_infant", 
                           "nUF_infant", "nUM_infant", "nUU_infant")
 cap_agesex_infant$sequenceID <- rownames(cap_agesex_infant)
@@ -226,7 +240,7 @@ cap_agesex_infant$sequenceID <- rownames(cap_agesex_infant)
 ## THIS IS NOT YET FIXED, SEEMS TO ALSO BE FOR CASES WHERE INFANT WAS NOT CODED AS INFANT CARE!! 
 
 # number of neck infants
-cap_neck_infant <- as.data.frame(ftable(agoutigross$sequenceID[which(str_detect(agoutigross$comments.x, "neck infant") == TRUE)]))
+cap_neck_infant <- as.data.frame(ftable(agoutigross$sequenceID[which(str_detect(agoutigross$observationComments, "neck infant") == TRUE)]))
 colnames(cap_neck_infant) <- c("sequenceID", "n_neckinfant")
 
 # add this to agoutigross dataframe
@@ -244,7 +258,7 @@ agoutigross$nMales <- agoutigross$nAM + agoutigross$nSM + agoutigross$nJM + agou
 
 ##### Inspections #####
 # add nr or capuchins inspecting camera trap
-agoutigross_capinsp <- agoutigross[agoutigross$capuchin == 1 & str_detect(agoutigross$behaviour, "Inspecting"), ]
+agoutigross_capinsp <- agoutigross[agoutigross$capuchin == 1 & str_detect(agoutigross$behavior, "Inspecting"), ]
 # nr of adults inspecting
 cap_numbers_insp_ad <- agoutigross_capinsp[agoutigross_capinsp$lifeStage == "adult",] %>%
   dplyr::count(sequenceID)
@@ -266,14 +280,14 @@ agoutigross <- left_join(agoutigross, cap_numbers_insp_unknown, "sequenceID")
 ##### Displacements #####
 # info we'd like to have for analyses and need to extract now
 # very broadly could do whether displacement occurs in a sequence 1/0 and then see if there are adult females present
-agoutigross_disp <- agoutigross[str_detect(agoutigross$comments.x, "displace"), c("agesex", "lifeStage", "sex", "sequenceID", "comments.x", "comments.y")]
+agoutigross_disp <- agoutigross[str_detect(agoutigross$observationComments, "displace"), c("agesex", "lifeStage", "sex", "sequenceID", "observationComments")]
 
 agoutigross$displacement <- ifelse(agoutigross$sequenceID %in% agoutigross_disp$sequenceID, 1, 0)
 
 # agesex of displacer based on comments
 # agesex of displacee based on comments
-agoutigross_disp$victim_as <- ifelse(str_detect(agoutigross_disp$comments.x, "displaced"), agoutigross_disp$agesex, NA)
-agoutigross_disp$aggressor_as <- ifelse(str_detect(agoutigross_disp$comments.x, "displaced") == FALSE, agoutigross_disp$agesex, NA)
+agoutigross_disp$victim_as <- ifelse(str_detect(agoutigross_disp$observationComments, "displaced"), agoutigross_disp$agesex, NA)
+agoutigross_disp$aggressor_as <- ifelse(str_detect(agoutigross_disp$observationComments, "displaced") == FALSE, agoutigross_disp$agesex, NA)
 victims <- agoutigross_disp[!is.na(agoutigross_disp$victim_as),c("sequenceID", "victim_as")]
 aggressors <- agoutigross_disp[!is.na(agoutigross_disp$aggressor_as),c("sequenceID", "aggressor_as")]
 displacements <- full_join(victims, aggressors, "sequenceID")
@@ -290,39 +304,39 @@ ftable(agoutigross$victim_as)
 #### Foraging items ####
 # what is being foraged on per sequence
 # check if one individual forages on more things
-multipleitems <- agoutigross[which(str_count(agoutigross$behaviour, "F:")> 1),]
+multipleitems <- agoutigross[which(str_count(agoutigross$behavior, "F:")> 1),]
 # not that many, and usually they eat the same thing. So I think it's fine to only record one item per individual
 # follows the order specified below
 
 # what they are foraging using tools
-agoutigross$tool_item <- ifelse(str_detect(agoutigross$behaviour, "TAF: Palm"), "palm", 
-                           ifelse(str_detect(agoutigross$behaviour, "TAF: Coconut"), "coconut", 
-                                  ifelse(str_detect(agoutigross$behaviour, "TAF: Embedded"), "insect",
-                                         ifelse(str_detect(agoutigross$behaviour, "TAF: Halloween"), "hwcrab",
-                                                ifelse(str_detect(agoutigross$behaviour, "TAF: Hermit"), "hecrab",
-                                                       ifelse(str_detect(agoutigross$behaviour, "TAF: Snail"), "snail",
-                                                              ifelse(str_detect(agoutigross$behaviour, "TAF: Almendra"), "almendra",
-                                                                     ifelse(str_detect(agoutigross$behaviour, "TAF: Other"), "other", 
-                                                                            ifelse(str_detect(agoutigross$behaviour, "TAF: Unknown"), "unknown", NA)))))))))                                        
+agoutigross$tool_item <- ifelse(str_detect(agoutigross$behavior, "TAF: Palm"), "palm", 
+                           ifelse(str_detect(agoutigross$behavior, "TAF: Coconut"), "coconut", 
+                                  ifelse(str_detect(agoutigross$behavior, "TAF: Embedded"), "insect",
+                                         ifelse(str_detect(agoutigross$behavior, "TAF: Halloween"), "hwcrab",
+                                                ifelse(str_detect(agoutigross$behavior, "TAF: Hermit"), "hecrab",
+                                                       ifelse(str_detect(agoutigross$behavior, "TAF: Snail"), "snail",
+                                                              ifelse(str_detect(agoutigross$behavior, "TAF: Almendra"), "almendra",
+                                                                     ifelse(str_detect(agoutigross$behavior, "TAF: Other"), "other", 
+                                                                            ifelse(str_detect(agoutigross$behavior, "TAF: Unknown"), "unknown", NA)))))))))                                        
 
 
 
 ftable(agoutigross$tool_item)
 
 # what they are foraging on without tools
-agoutigross$normal_item <- ifelse(str_detect(agoutigross$behaviour,  "F: Fruit"), "fruit", 
-                                  ifelse(str_detect(agoutigross$behaviour, "F: Coco flesh|F: Coco water"), "coconut", 
-                                         ifelse(str_detect(agoutigross$behaviour, "F: Insect"), "insect",
-                                                                     ifelse(str_detect(agoutigross$behaviour, "F: Almendra flesh"), "almendra",
-                                                                            ifelse(str_detect(agoutigross$behaviour, "\\bF: Other"), "other", 
-                                                                                   ifelse(str_detect(agoutigross$behaviour, "\\bF: Unknown"), "unknown", NA))))))                                      
+agoutigross$normal_item <- ifelse(str_detect(agoutigross$behavior,  "F: Fruit"), "fruit", 
+                                  ifelse(str_detect(agoutigross$behavior, "F: Coco flesh|F: Coco water"), "coconut", 
+                                         ifelse(str_detect(agoutigross$behavior, "F: Insect"), "insect",
+                                                                     ifelse(str_detect(agoutigross$behavior, "F: Almendra flesh"), "almendra",
+                                                                            ifelse(str_detect(agoutigross$behavior, "\\bF: Other"), "other", 
+                                                                                   ifelse(str_detect(agoutigross$behavior, "\\bF: Unknown"), "unknown", NA))))))                                      
 
 ftable(agoutigross$normal_item)
 
 # if 'other', see if we can get information from the comments
 agoutigross$comment_item <- NA
-agoutigross$comment_item[which(str_detect(agoutigross$behaviour, "Other"))] <- 
-  agoutigross$comments.x[which(str_detect(agoutigross$behaviour, "Other"))]
+agoutigross$comment_item[which(str_detect(agoutigross$behavior, "Other"))] <- 
+  agoutigross$observationComments[which(str_detect(agoutigross$behavior, "Other"))]
 
 # include at least fruit and crab and snail
 agoutigross$normal_item[which(agoutigross$normal_item == "other")] <- 
@@ -339,7 +353,7 @@ agoutigross$tool_item[which(agoutigross$tool_item == "other")] <-
                 ifelse(str_detect(agoutigross$comment_item[which(agoutigross$tool_item == "other")], "snail"), "snail", "other")))
 
 # whether tool-using occurred in the sequence or not
-agoutigross$tooluse <- str_detect(agoutigross$behaviour, "TAF") # now just takes all types of tool use, also unknown
+agoutigross$tooluse <- str_detect(agoutigross$behavior, "TAF") # now just takes all types of tool use, also unknown
 agoutigross_tools <- agoutigross[agoutigross$tooluse == TRUE,]
 # amount of individuals using tools per sequence
 tooluse_count <- agoutigross_tools %>%
@@ -386,7 +400,7 @@ tool_items2 <- tool_items[,c("sequenceID", "seq_toolitem")]
 agoutigross <- left_join(agoutigross, tool_items2, "sequenceID")
 
 # normal items
-agoutigross_foraging <- agoutigross[str_detect(agoutigross$behaviour, "\\bF:"),]
+agoutigross_foraging <- agoutigross[str_detect(agoutigross$behavior, "\\bF:"),]
 normal_items <- as.data.frame(as.matrix(ftable(agoutigross_foraging$sequenceID, agoutigross_foraging$normal_item)))
 # set unknown foraging to 1 for all rows, so that when there are two things being processed (e.g. one unknown, one almendra) you keep the almendra
 # this is crude solution but works
@@ -403,7 +417,7 @@ agoutigross <- left_join(agoutigross, normal_items2, "sequenceID")
 agoutigross$bothforage <- ifelse(is.na(agoutigross$seq_toolitem) == FALSE & is.na(agoutigross$seq_normalitem) == FALSE, 1, 0)
 
 # how many cases in which they forage with and without tools
-unique(agoutigross$behaviour[which(agoutigross$bothforage == 1)])
+unique(agoutigross$behavior[which(agoutigross$bothforage == 1)])
 
 # make general item one, if they both use tools and forage normally, tools take precedent
 agoutigross$seq_item <- ifelse(agoutigross$bothforage == 0 & is.na(agoutigross$seq_toolitem) == FALSE, agoutigross$seq_toolitem,
@@ -429,7 +443,7 @@ agoutigross[which(is.na(agoutigross$foraging_item1) == FALSE & is.na(agoutigross
 # so if 4 out of 5 capuchins eat insects in a sequence, still 3 could be eating almendras (cause they eat several things at once)
 # this seems fair. Can also do this otherwise. 
 
-agoutigross_allforaging <- agoutigross[str_detect(agoutigross$behaviour, "F:"),]
+agoutigross_allforaging <- agoutigross[str_detect(agoutigross$behavior, "F:"),]
 
 d1 <- as.data.frame(as.matrix(ftable(agoutigross_allforaging$sequenceID, agoutigross_allforaging$foraging_item1)))
 d2 <- as.data.frame(as.matrix(ftable(agoutigross_allforaging$sequenceID, agoutigross_allforaging$foraging_item2)))
@@ -453,7 +467,7 @@ all_items2 <- all_items[,c("sequenceID", "nr_almendra", "nr_coconut", "nr_fruit"
 agoutigross <- left_join(agoutigross, all_items2, "sequenceID")
 
 ##### Tolerated scrounging and foraging on anvil debris ######
-cap_scrounge <- agoutigross[str_detect(agoutigross$behaviour, "scroung") & agoutigross$n_tooluse >0,]
+cap_scrounge <- agoutigross[str_detect(agoutigross$behavior, "scroung") & agoutigross$n_tooluse >0,]
 cap_scrounge_as <- as.data.frame(as.matrix(ftable(cap_scrounge$sequenceID, cap_scrounge$agesexF)))
 colnames(cap_scrounge_as) <- c("sc_nAF", "sc_nAM", "sc_nAU", "sc_nJF", "sc_nJM", "sc_nJU", "sc_nSF", "sc_nSM", "sc_nSU", 
                                "sc_nUF", "sc_nUM", "sc_nUU")
@@ -462,7 +476,7 @@ cap_scrounge_as$sequenceID <- rownames(cap_scrounge_as)
 agoutigross <- left_join(agoutigross, cap_scrounge_as, "sequenceID")
 
 # anvil debris
-cap_debris <- agoutigross[str_detect(agoutigross$behaviour, "debris") & agoutigross$capuchin == 1,]
+cap_debris <- agoutigross[str_detect(agoutigross$behavior, "debris") & agoutigross$capuchin == 1,]
 cap_debris_as <- as.data.frame(as.matrix(ftable(cap_debris$sequenceID, cap_debris$agesexF)))
 colnames(cap_debris_as) <- c("ad_nAF", "ad_nAM", "ad_nAU", "ad_nJF", "ad_nJM", "ad_nJU", "ad_nSF", "ad_nSM", "ad_nSU", 
                                "ad_nUF", "ad_nUM", "ad_nUU")
@@ -488,18 +502,20 @@ agoutigross$n_inspect <- agoutigross$n_inspect_adult + agoutigross$n_inspect_non
 ### at this point can FILTER OUR THE BLANKS
 # remove all timelapse triggers
 # flag the uncoded sequences in here that are not camera setup
-agoutigross$uncoded <- ifelse(agoutigross$observationType == "unclassified" & agoutigross$cameraSetup == "False" & agoutigross$classificationTimestamp == "" & agoutigross$captureMethod == "motion detection", 1, 0)
+agoutigross$uncoded <- ifelse(agoutigross$observationType == "unclassified" & agoutigross$cameraSetup == "False" & agoutigross$classificationTimestamp == "" & agoutigross$captureMethod == "activityDetection", 1, 0)
 
 # exclude blanks, unclassified and unknown
 ftable(agoutigross$observationType)
 # exclude all timelapse triggers, all blanks. Keep the unclassified (uncoded) ones in cause those allow you to filter out which deployments are coded or not
-agoutigross2 <- agoutigross[which(agoutigross$observationType != "blank" & agoutigross$captureMethod == "motion detection"),]
+agoutigross2 <- agoutigross[which(agoutigross$observationType != "blank" & agoutigross$captureMethod == "activityDetection"),]
 
 # can still clean up by removing unnecessary columns
 # keep checking if these are the right ones to remove
-agouticlean <- agoutigross2[, !names(agoutigross2) %in% c("timestamp","mediaID", "classificationConfidence", "coordinateUncertainty", "start", "end", "cameraID", "cameraModel", "baitUse", "featureType",
-                                            "timestampIssues", "cameraTilt", "session", "array", "habitat", "X_id.y", "X_id.x", "comments.y", "time", "comment_item", "foraging_item1", "foraging_item2",
-                                            "countNew", "cameraHeading")]
+agouticlean <- agoutigross2[, !names(agoutigross2) %in% c("eventStart", "eventID", "eventEnd",  "mediaID", "observationLevel", "cameraSetupType", "classificationProbability", "coordinateUncertainty",
+                                                          "start", "end", "cameraID", "cameraModel", "baitUse", "featureType", "individualPositionRadius", "individualPositionAngle", "individualSpeed",
+                                                          "bboxX", "bboxY", "bboxWidth", "bboxHeight", "cameraID", "cameraModel", "cameraDelay", "cameraHeight", "cameraDepth", "cameraTilt", "cameraHeading",
+                                                          "detectionDistance", "timestampIssues", "featureType", "deploymentGroups", "deploymentTags", "baitUse",
+                                                          "habitat", "time", "comment_item", "foraging_item1", "X", "foraging_item2", "countNew", "cameraHeading")]
 
 # drop duplicated sequences, necessary form for tidal analyses and data exploration
 # lose individual info etc so to analyze like that need to use agoutigross
