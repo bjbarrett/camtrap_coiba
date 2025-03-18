@@ -1,10 +1,6 @@
 ## Investigating group cohesion in grid data of fixed anvil tool-using vs non-tool-using groups 
 ## MPI-AB; Z Goldsborough
 
-## STEP 1: Run "agouti_cleaning.R" script and its dependencies (1. "exiftempseq_cleaning.R" 2. "tide_cleaning.R")
-# this script starts with "agouticlean" which is cleaned, not yet aggregated to sequence level or excluded incomplete deployments
-# alternatively uses "agoutisequence" which is cleaned and aggregated to sequence level
-
 ## Packages required (check if still required after cleaning)
 library(stringr)
 library(ggplot2)
@@ -33,13 +29,20 @@ library(mapview)
 library(sf)
 library(fitdistrplus)
 
+
+# STILL DO
+# PRIOR SIMULATIONS AND SET MY PRIORS
+# RUN FINAL MODELS WITH 3 CHAINS 3000 ITERATIONS AND ADD_CRITERION ETC
+
+
+
 ##### DIAGNOSTICS & FILTERING ####
-## Subset to only grid cameras
-# observation level dataframe 
-gridclean <- agouticlean[which(str_detect(agouticlean$locationName, "TU") == TRUE),]
+# Load in grid data
+# observation level dataframe
+gridclean <- read.csv("gridanalyses/RDS/gridclean.csv")
 ftable(gridclean$locationName)
-# sequence level
-gridsequence <- agoutisequence_c[which(str_detect(agoutisequence_c$locationName, "TU") == TRUE),]
+# sequence level dataframe
+gridsequence <- read.csv("gridanalyses/RDS/gridsequence.csv")
 ftable(gridsequence$locationName)
 
 ## exclude grid cameras that are blank due to malfunctions
@@ -52,8 +55,6 @@ gridclean_c <- droplevels.data.frame(gridclean_c)
 gridsequence_c <-  gridsequence[! gridsequence$locationName %in% c("NTU-151", "TU-168", "TU-152"),]
 gridsequence_c$gridtype <- ifelse(str_detect(gridsequence_c$locationName, "NTU") == TRUE, "NTU", "TU")
 gridsequence_c <- droplevels.data.frame(gridsequence_c)
-#saveRDS(gridclean_c, "gridanalyses/RDS/gridclean_c.RDS")
-#saveRDS(gridsequence_c, "gridanalyses/RDS/gridsequence_c.RDS")
 
 ## Did we have at least one capuchin detection at all remaining cameras?
 ftable(gridsequence_c[which(gridsequence_c$capuchin == 1),]$locationName)
@@ -67,18 +68,18 @@ gridseq_oc$deplengthhours <- gridseq_oc$dep_length_hours
 gridseq_oc <- droplevels.data.frame(gridseq_oc)
 
 ## Filter out detections of unfamiliar individuals
-unfamiliars <-gridseq_oc$sequenceID[which(str_detect(gridseq_oc$comments.x, "unfamiliar") == TRUE)]
+unfamiliars <-gridseq_oc$sequenceID[which(str_detect(gridseq_oc$observationComments, "unfamiliar|Unfamiliar") == TRUE)]
 gridseq_ocf <- gridseq_oc[! gridseq_oc$sequenceID %in% unfamiliars,]
 # how successful were we at assigning IDs and age sex
 ftable(gridseq_ocf$agesex, gridseq_ocf$toolusers)
-ftable(gridseq_ocf$name, gridseq_ocf$toolusers)
+ftable(gridseq_ocf$individualID, gridseq_ocf$toolusers)
 
 # visualize activity at the different cameras
 gridcamerasmap <- as.data.frame(ftable(gridseq_oc$locationName))
 colnames(gridcamerasmap) <- c("locationName", "ncapseq")
 gridcamerasmap <- left_join(gridcamerasmap, gridseq_oc[!duplicated(gridseq_oc$locationName),c("locationName", "longitude", "latitude")], by = "locationName")
 # locations with unfamiliar sightings
-unfamiliarsloc <- gridseq_oc$locationName[which(str_detect(gridseq_oc$comments.x, "unfamiliar") == TRUE)]
+unfamiliarsloc <- gridseq_oc$locationName[which(str_detect(gridseq_oc$observationComments, "unfamiliar|Unfamiliar") == TRUE)]
 gridcamerasmap$unfamiliar <- ifelse(gridcamerasmap$locationName %in% unfamiliarsloc, 1.2, 1)
 gridcammap <- st_as_sf(gridcamerasmap, coords = c("longitude", "latitude"), crs = 4326)
 
@@ -151,7 +152,7 @@ summary(c(TUgridcams_planreal$dist, NTUgridcams_planreal$dist))
 # max group size seen
 NTUgridseq <- gridseq_ocf[gridseq_ocf$gridtype == "NTU",]
 NTUgridseq[which(NTUgridseq$n == max(NTUgridseq$n)),]
-# in max group size, see 4 adult females, 5 adult males, 5 juveniles (of which one infant), 2 subadult males
+# in max group size, see 4 adult females, 4 adult males, 5 juveniles (of which one infant)
 
 # look at supposed group composition (max number of adult males and adult females seen in one sequence and how many we have IDed)
 max(NTUgridseq$nAF) # max of 4 adult females (have identified 5)
@@ -160,89 +161,43 @@ max(NTUgridseq$nJU) # max of 6 juveniles
 max(NTUgridseq$nSM) # max of 2 subadult males ( have identified 2, maybe 3)
 
 # co-occurrence of identifiable individuals (SNA network)
-# look at who occurs together in the same sequence. get nodes and see who has not been seen with anyone. 
-# step 1: working with gridclean dataframe, need to turn the IDstrings into the ID key codes we use for clarity.
-# step 2: per sequence, get some kind of dyadic information of who was seen with whom
-
-# make dataframe with individual variation
-gridagesex <- gridclean_c[,c("name","lifeStage", "sex", "gridtype")]
-gridagesex <- gridagesex[! is.na(gridagesex$name) == TRUE & ! duplicated(gridagesex$name),]
+# make dataframe with individual information
+gridagesex <- gridclean_c[,c("individualID","lifeStage", "sex", "gridtype")]
+gridagesex <- gridagesex[! is.na(gridagesex$individualID) == TRUE & ! duplicated(gridagesex$individualID),]
 NTUgridagesex <- gridagesex[gridagesex$gridtype == "NTU",]
 # for now just add real names in manually, later use key file
 NTUgridagesex$col <- ifelse(NTUgridagesex$sex == "male", "lightblue", "pink")
 NTUgridagesex$col <- ifelse(NTUgridagesex$lifeStage == "adult", NTUgridagesex$col, "lightgreen")
-NTUgridagesex <- NTUgridagesex[order(NTUgridagesex$name),]
+NTUgridagesex <- NTUgridagesex[order(NTUgridagesex$individualID),]
 
 # I think data format needs to be sequenceID/individualID
 # go to only NTU grid data and only sequence ID and individual ID (when individual ID was known)
-NTUassoc <- gridclean_c[gridclean_c$gridtype == "NTU" & ! is.na(gridclean_c$name) == TRUE, c("sequenceID", "name")]
+NTUassoc <- gridclean_c[gridclean_c$gridtype == "NTU" & ! is.na(gridclean_c$individualID) == TRUE, c("sequenceID", "individualID")]
 
 # then go from long to wide?
-NTUassoc_w <- dcast(NTUassoc, sequenceID ~ name)
+NTUassoc_w <- dcast(NTUassoc, sequenceID ~ individualID, fun.aggregate = length )
 NTUassoc_w2 <- NTUassoc_w
-NTUassoc_w2[is.na(NTUassoc_w2) == FALSE] <- 1
-NTUassoc_w2$sequenceID <- NTUassoc_w$sequenceID
-NTUassoc_w2[is.na(NTUassoc_w2)] <- 0
 NTUassoc_w2[,2:15] <- as.numeric(unlist(NTUassoc_w2[,2:15]))
 rownames(NTUassoc_w2) <- NTUassoc_w2$sequenceID
-NTUassoc_w2 <- NTUassoc_w2[,-1]
+NTUassoc_w2 <- NTUassoc_w2[,-c(1,2)]
 ## now we have a dataframe with all associations (whenever individuals were seen together in the same sequence) in GBI (group by individual) format
 # use this with asnipe package to get a network 
 adj.m <- get_network(NTUassoc_w2, association_index = "SRI")
 assoc.g <- graph_from_adjacency_matrix(adj.m, "undirected", weighted = T)
-plot(assoc.g, edge.width = E(assoc.g)$weight*100)
+plot(assoc.g, vertex.color =NTUgridagesex$col, dge.width = E(assoc.g)$weight*100)
 
 net_NTU <- graph.adjacency(adj.m, mode = "undirected", weighted = TRUE, diag = FALSE)
+# png("gridanalyses/RDS/SNA_NTU.png", width = 8, height = 6, units = 'in', res = 300)
 plot(net_NTU, vertex.color = NTUgridagesex$col, edge.width = E(assoc.g)$weight*100)
+# dev.off()
 coms_NTU <- fastgreedy.community(net_NTU) #identify communities
 NTUgridagesex$COM <- membership(coms_NTU) #assign membership of communities
 plot(net_NTU, vertex.color =NTUgridagesex$col, edge.with = 20*E(net_NTU)$weight^2, mark.groups = coms_NTU)
 
 # largely appears to be one group, only Drop and Kai are unsure, but they were also only seen very rarely 
 
-### SNA TU GROUP ##########
-TUassoc <- gridclean_c[gridclean_c$gridtype == "TU"  & ! is.na(gridclean_c$name) == TRUE, c("sequenceID", "name")]
-
-# make dataset with all unique individuals and their age-sex
-head(gridseq_ocf)
-inds <- gridclean_c[!duplicated(gridclean_c$name) & gridclean_c$gridtype == "TU", c("name", "lifeStage", "sex")]
-inds <- inds[-1,]
-inds$col <- NA
-inds$lifeStage[inds$name %in% c("SPT (Spot)", "LAR (Larry)")] <- "subadult"
-inds$col[which(inds$sex == "male"  & inds$lifeStage == "adult")] <- "lightblue"
-inds$col[which(inds$sex == "female" & inds$lifeStage == "adult")] <- "pink"
-inds$col[which(inds$sex == "male"  & inds$lifeStage != "adult")] <- "lightgreen"
-inds$col[which(inds$sex == "female" & inds$lifeStage != "adult")] <- "purple"
-
-inds <- inds[order(inds$name),]
-
-# then go from long to wide?
-TUassoc_w <- dcast(TUassoc, sequenceID ~ name)
-TUassoc_w2 <- TUassoc_w
-TUassoc_w2[is.na(TUassoc_w2) == FALSE] <- 1
-TUassoc_w2$sequenceID <- TUassoc_w$sequenceID
-TUassoc_w2[is.na(TUassoc_w2)] <- 0
-TUassoc_w2[,2:16] <- as.numeric(unlist(TUassoc_w2[,2:16]))
-rownames(TUassoc_w2) <- TUassoc_w2$sequenceID
-TUassoc_w2 <- TUassoc_w2[,-c(1)]
-TUassoc_w2 <- TUassoc_w2[,sort(colnames(TUassoc_w2))]
-
-## now we have a dataframe with all associations (whenever individuals were seen together in the same sequence) in GBI (group by individual) format
-# use this with asnipe package to get a network 
-adj.m_TU <- get_network(TUassoc_w2, association_index = "SRI")
-assoc.g_TU <- graph_from_adjacency_matrix(adj.m_TU, "undirected", weighted = T)
-plot(assoc.g_TU, edge.width = E(assoc.g_TU)$weight*200)
-
-net_TU <- graph.adjacency(adj.m_TU, mode = "undirected", weighted = TRUE, diag = FALSE)
-plot(net_TU, vertex.color = inds$col, edge.width = E(assoc.g_TU)$weight*100)
-coms_TU <- fastgreedy.community(net_TU) #identify communities
-TUgridagesex$COM <- membership(coms_TU) #assign membership of communities
-plot(net_TU, vertex.color =inds$col, edge.with = 20*E(net_TU)$weight^2, mark.groups = coms_TU)
-
-# for attempt with BISON package see gridanalyses_general script
-
 ##### DAILY ACTIVITY PATTERN #####
-# first just visually, what time of day do we see activity of capuchins? 
+# Visually, what time of day do we see activity of capuchins? 
 # colors for two histograms in one
 c1 <- rgb(173,216,230,max = 255, alpha = 80, names = "lt.blue")
 c2 <- rgb(255,192,203, max = 255, alpha = 80, names = "lt.pink")
@@ -250,29 +205,16 @@ c2 <- rgb(255,192,203, max = 255, alpha = 80, names = "lt.pink")
 ### Tool users vs non tool users
 histTU <- hist(gridseq_ocf$hour[gridseq_ocf$gridtype == "TU"], breaks = seq(from = 0, to = 24, by = 1), xlim = c(0, 24), freq = FALSE)
 histNTU <- hist(gridseq_ocf$hour[gridseq_ocf$gridtype == "NTU"], breaks = seq(from = 0, to = 24, by = 1), xlim = c(0, 24), freq = FALSE)
-
 plot(histNTU, col = c2, freq = FALSE, main = "Tool users (blue) vs non-tool users (red)", xlab = "Time of Day", ylab = "Proportion of sequences with capuchins", ylim = c(0, 0.12))
 plot(histTU, col = c1, freq = FALSE, add = TRUE)
 
 # in general TU group appears to be active more later in the afternoon
 # all early morning and late evening activity is from the TU group
-# look at this closer
 nightowls <- gridseq_ocf[gridseq_ocf$hour < 5 | gridseq_ocf$hour > 19,]
 # all of these cameras seem to have the correct time set. So this means we truly have a capuchin detection at midnight and one at 4 AM!
 
-## still make proper daily activity model of this, look at Lester's paper for example code etc
-# following this  vignette https://bookdown.org/c_w_beirne/wildCo-Data-Analysis/activity.html
-
-## I think the right data format is what agouti gives you not aggregated to a sequence
-# so each sequence gets repeated for each individual sighting
-# use data with only capuchins in it
-head(gridseq_ocf)
-# relevant columns are the gridtype (TU or NTU)
-# seq_start time, which is when the observation occurred
-
-# have various ways of representing time
-# the best and most relevant to me, seems to be solar time, which uses coordinates of observations to determine sunrise and sunset
-# then the activity is classified as being during the day or during the night
+## Activity analysis
+# set to solar time (activity classified as being during day or during night)
 gridseq_ocf$timestamp <- ymd_hms(gridseq_ocf$seq_start, tz = "America/Panama")
 
 tmp <- solartime(gridseq_ocf$timestamp,
@@ -288,7 +230,7 @@ plot(gridseq_ocf$solar, gridseq_ocf$clock)
 
 # compare TU to NTU
 # TU
-act_m1 <- fitact(gridseq_ocf$solar[gridseq_ocf$gridtype == "TU"], sample = "model", reps = 1000) # need to use 1000 reps
+act_m1 <- fitact(gridseq_ocf$solar[gridseq_ocf$gridtype == "TU"], sample = "model", reps = 1000) 
 #saveRDS(act_m1, "gridanalyses/RDS/act_m1.RDS")
 #act_m1 <- readRDS("gridanalyses/RDS/act_m1.RDS")
 plot(act_m1)
@@ -296,8 +238,9 @@ act_m1@act[1] * 24
 # this means they spend 0.38 * 24 = 9 hours per day active
 
 # NTU
-act_m2 <- fitact(gridseq_ocf$solar[gridseq_ocf$gridtype == "NTU"], sample = "model", reps = 1000) # need to use at least 1000 reps
+act_m2 <- fitact(gridseq_ocf$solar[gridseq_ocf$gridtype == "NTU"], sample = "model", reps = 1000) 
 #saveRDS(act_m2, "gridanalyses/RDS/act_m2.RDS")
+#act_m2 <- readRDS("gridanalyses/RDS/act_m2.RDS")
 plot(act_m2)
 act_m2@act[1] * 24
 # this means they spend 0.38 * 24 = 10 hours per day active
@@ -318,75 +261,36 @@ legend("topright", c("TU", "NTU"), col=c("#C8800F","#81A956"), lty=c(1,5), lwd=2
 
 # overlap between the two
 compareCkern(act_m1, act_m2, reps = 100)
-# 0.895925655 lot of overlap
+# 0.896448990 lot of overlap
 
 ##### PARTY SIZE ####
 
-###### 1: Does the number of capuchins per sequence differ between TU and NTU grid? ####
-# account for camera and detection distance (if we have it)
+###### 1: Mean party size ####
 mean(gridseq_ocf$n[gridseq_ocf$gridtype == "NTU"])
 mean(gridseq_ocf$n[gridseq_ocf$gridtype == "TU"])
-## need to model this obvs, some kind of poisson?
 hist(gridseq_ocf$n[gridseq_ocf$gridtype == "NTU"])
 hist(gridseq_ocf$n[gridseq_ocf$gridtype == "TU"])
 
-t.test(gridseq_ocf$n ~ gridseq_ocf$gridtype)
-
-ftable(gridseq_ocf$n)
-(2621/3802) * 100 # 68.94 percent of all data is 1's 
+ftable(gridseq_ocf$n) # 68.94 percent of all data is 1's 
 max(gridseq_ocf$n[gridseq_ocf$gridtype == "NTU"])
 max(gridseq_ocf$n[gridseq_ocf$gridtype == "TU"])
-
-# there is now also this package oneinfl with one-inflated models (poisson and zero-truncated regression)
-# https://rtgodwin.com/oneinfl/
-formula <- n ~ gridtype
-OIPP <- oneinfl(formula, gridseq_ocf, dist = "Poisson")
-OIZTNB <- oneinfl(formula, gridseq_ocf, dist = "negbin")
-ZTNB <-  truncreg(formula, gridseq_ocf, dist="negbin")
-PP <- truncreg(formula, gridseq_ocf, dist="Poisson")
-
-# test whether there is overdispersion
-oneLRT(OIZTNB, OIPP) # yes there is, so would favor negative binomial
-# test whether there is one-inflation
-oneLRT(OIZTNB, ZTNB) # yes there is, so one inflated model is better
-oneWald(OIZTNB)
-
-oneplot(PP, OIPP, ZTNB, OIZTNB, df = gridseq_ocf)
-summary(OIZTNB)
-signifWald(OIZTNB, "gridtypeTU")
-
-ps_bm1a <- brm(n |trunc(lb = 1) ~ gridtype + (1|locationfactor) + offset(log(deplengthhours)), data = gridseq_ocf, family = poisson(), iter = 2000, chain = 2, core = 2, backend = "cmdstanr")
-#saveRDS(ps_bm1a, "gridanalyses/RDS/ps_bm1a.rds")
-#ps_bm1a <- readRDS("gridanalyses/RDS/ps_bm1a.rds")
-summary(ps_bm1a)
-plot(ps_bm1a)
-plot(conditional_effects(ps_bm1a))
-pp_check(ps_bm1a)
-hypothesis(ps_bm1a, "Intercept < Intercept + gridtypeTU")
 
 ## Social party size rather than total party size
 gridseq_ocf$partysize <- gridseq_ocf$n - 1
 hist(gridseq_ocf$partysize)
 
-sps_bm1 <-  brm(partysize ~ gridtype + (1|locationfactor) + offset(log(deplengthhours)), data = gridseq_ocf, family = zero_inflated_poisson(), iter = 2000, chain = 2, core = 2, backend = "cmdstanr")
-#saveRDS(sps_bm1, "gridanalyses/RDS/sps_bm1.rds")
-#sps_bm1 <- readRDS("gridanalyses/RDS/sps_bm1.rds")
-summary(sps_bm1)
-plot(sps_bm1)
-plot(conditional_effects(sps_bm1))
-pp_check(sps_bm1)
-hypothesis(sps_bm1, "Intercept > Intercept + gridtypeTU")
-
-sps_bm1a <-  brm(bf(partysize ~ gridtype + (1|locationfactor) + offset(log(deplengthhours)), hu ~ gridtype + (1|locationfactor)), data = gridseq_ocf, family = hurdle_poisson(), iter = 2000, chain = 2, core = 2, backend = "cmdstanr")
+sps_bm1a <-  brm(bf(partysize ~ gridtype + (1|locationfactor) + offset(log(deplengthhours)), hu ~ gridtype + (1|locationfactor)), 
+                 data = gridseq_ocf, family = hurdle_poisson(), iter = 2000, chain = 2, core = 2, backend = "cmdstanr")
 #saveRDS(sps_bm1a, "gridanalyses/RDS/sps_bm1a.rds")
 #sps_bm1a <- readRDS("gridanalyses/RDS/sps_bm1a.rds")
+
 summary(sps_bm1a)
 plot(sps_bm1a)
 plot(conditional_effects(sps_bm1a))
 pp_check(sps_bm1a)
 hypothesis(sps_bm1a, "Intercept > Intercept + gridtypeTU")
 
-# some interpretation with explanation
+# Interpretation
 # https://www.andrewheiss.com/blog/2022/05/09/hurdle-lognormal-gaussian-brms/
 tidy(sps_bm1a)
 # probability of a 0 (party of 1) in NTU
@@ -415,7 +319,7 @@ emmeans(sps_bm1a, "gridtype", dpar = "mu", regrid = "response")
 emmeans(sps_bm1a, "gridtype", regrid = "response")
 
 
-###### 2. Does the number of capuchins per sequence fluctuate depending on the hour of day, and does this relationship differ between TU and NTU ####
+###### 2: Variability in party size ####
 ggplot(data = gridseq_ocf, aes( x= hour, y = n, col = gridtype, shape = gridtype)) + geom_point(alpha = 0.5, aes(shape = gridtype)) + geom_smooth()
 ggplot(data = gridseq_ocf, aes( x= seqday, y = n, col = gridtype)) + geom_point(alpha = 0.5,) + geom_smooth() + facet_wrap(~gridtype)
 
@@ -439,289 +343,19 @@ descdist(gridseq_daysd$party_sd)
 testdist1.1 <- fitdist(gridseq_daysd$party_sd, "lognormal")
 plot(testdist1.1)
 
-
 # compare sd in party size between NTU and TU. locationfactor as random effect. number of parties as offset (?) or fixed effect
-psd_bm1 <- brm(party_sd ~ gridtype + (1|locationfactor) + offset(log(party_n)), data = gridseq_daysd, 
+ps_bm1b <- brm(party_sd ~ gridtype + (1|locationfactor) + offset(log(party_n)), data = gridseq_daysd, 
                family = hurdle_gamma(), iter= 2000, chain =2, core = 2, backend = "cmdstanr")
-#saveRDS(psd_bm1), "gridanalyses/RDS/psd_bm1.rds")
-#psd_bm1 <- readRDS("gridanalyses/RDS/psd_bm1.rds")
-summary(psd_bm1)
-plot(conditional_effects(psd_bm1))
-hypothesis(psd_bm1, "Intercept  > Intercept + gridtypeTU", alpha = 0.05)
-
-
-# hurdle gam?
-sps_bm2 <- brm(bf(partysize ~ s(hour, by = gridtype) + gridtype +  s(locationfactor, bs = "re") + offset(log(deplengthhours)), hu ~ gridtype + s(locationfactor, bs = "re")), 
-               data = gridseq_ocf, family = hurdle_poisson(), iter = 2000, chain = 2, core = 2, backend = "cmdstanr")
-#saveRDS(sps_bm2, "gridanalyses/RDS/sps_bm2.rds")
-#sps_bm2 <- readRDS("gridanalyses/RDS/sps_bm2.rds")
-summary(sps_bm2)
-plot(conditional_smooths(sps_bm2))
-plot(conditional_effects(sps_bm2))
-pp_check(sps_bm2)
-
-tidy(sps_bm2)
-# probability of a 0 (party of 1) in NTU
-hurdle_intercept <- tidy(sps_bm2) |> 
-  filter(term == "hu_(Intercept)") |> 
-  pull(estimate)
-plogis(hurdle_intercept)
-# probability of a 0 (party of 1) in TU
-hurdle_TU <- tidy(sps_bm2) |>
-  filter(term == "hu_gridtypeTU") |>
-  pull(estimate)
-
-(plogis(hurdle_intercept + hurdle_TU) - plogis(hurdle_intercept)) * 100
-# tool using group increases probability of a 0 (party of 1) by 1.98 percentage points, on average
-
-## # https://www.andrewheiss.com/blog/2022/05/09/hurdle-lognormal-gaussian-brms/
-# still make plots like on that website with the increase/change over time?
-
-# hurdle gam not hour of day but continuous seqtime. 
-gridseq_ocf$time <- as.numeric(gridseq_ocf$seq_start)/1000
-sps_bm3 <- brm(bf(partysize ~ s(time, by = gridtype) + gridtype +  s(locationfactor, bs = "re") + offset(log(deplengthhours)), hu ~ gridtype + s(locationfactor, bs = "re")), 
-               data = gridseq_ocf, family = hurdle_poisson(), iter = 2000, chain = 2, core = 2, backend = "cmdstanr")
-#saveRDS(sps_bm3, "gridanalyses/RDS/sps_bm3.rds")
-#sps_bm3 <- readRDS("gridanalyses/RDS/sps_bm3.rds")
-summary(sps_bm3)
-plot(conditional_smooths(sps_bm3))
-plot(conditional_effects(sps_bm3))
-pp_check(sps_bm3)
-
-tidy(sps_bm2)
-# probability of a 0 (party of 1) in NTU
-hurdle_intercept <- tidy(sps_bm2) |> 
-  filter(term == "hu_(Intercept)") |> 
-  pull(estimate)
-plogis(hurdle_intercept)
-# probability of a 0 (party of 1) in TU
-hurdle_TU <- tidy(sps_bm2) |>
-  filter(term == "hu_gridtypeTU") |>
-  pull(estimate)
-
-(plogis(hurdle_intercept + hurdle_TU) - plogis(hurdle_intercept)) * 100
-# tool using group increases probability of a 0 (party of 1) by 1.98 percentage points, on average
-
-
-# use a GAM
-## hour of day is not cyclic spline, as we have no observations at midnight and early in morning for the NTU (explained in bottom of the heap youtube) (but we do at TU?)
-grid_gam1 <- gam(n ~ s(hour, by = gridtype) + gridtype, offset = log(deplengthhours), data = gridseq_ocf, method = "REML", family = poisson())
-
-summary(grid_gam1)
-draw(grid_gam1)
-# This simplest model seems to suggest for NTU there is no real nonlinear relationship (slight trend).
-# if anything, is lower party size in morning and then constant throughout day until evening
-# for TU, see higher party size in mornings and evenings, lower throughout the day
-
-gam.check(grid_gam1)
-# seems to still be a lot of unexplained variation we are not capturing
-# probably we'd need to deal with the heavy 1 inflation to understand this model well
-# it's now all being flattened by the many 1s sprinkled everywhere
-# maybe we should include the 0s too? 
-
-# including locationfactor as a random effect
-grid_gam2 <- gam(n ~ s(hour, by = gridtype) + gridtype +  s(locationfactor, bs = "re"), offset = log(deplengthhours), data = gridseq_ocf, method = "REML", family = negbin())
-
-summary(grid_gam2)
-draw(grid_gam2)
-gam.check(grid_gam2)
-plot(grid_gam2, seWithMean = TRUE, shift = coef(grid_gam2)[1])
-
-plot(grid_gam2, all.terms=TRUE, rug=TRUE, pages = 1, seWithMean = TRUE, shade = TRUE, shade.col = "light blue", shift = coef(grid_gam2)[1], trans = exp)
-
-## Need to think further on how to model this. Is poisson appropriate without 0s? should be 1-inflated. Once I'm satisfied with it could take it to brms
-
-## brms
-# zero-truncated  negative binomial
-# this makes  sense theoretically but seems to take an eternity to run so I have not yet been able to 
-ps_bm1a <- brm(n |trunc(lb = 1) ~ s(hour, by = gridtype) + gridtype +  s(locationfactor, bs = "re") + offset(log(deplengthhours)), data = gridseq_ocf, family = negbinomial(), iter = 1000, chain = 2, core = 2, backend = "cmdstanr")
-#saveRDS(ps_bm1, "gridanalyses/RDS/ps_bm1.rds")
-#ps_bm1 <- readRDS("gridanalyses/RDS/ps_bm1.rds")
-summary(ps_bm1a)
-plot(conditional_smooths(ps_bm1a))
-plot(conditional_effects(ps_bm1a))
-pp_check(ps_bm1)
-
-
-# zero-truncated poisson
-## STILL RE-RUN WITH UNFAMILIARS FILTERED OUT
-ps_bm1 <- brm(n |trunc(lb = 1) ~ s(hour, by = gridtype) + gridtype +  s(locationfactor, bs = "re") + offset(log(deplengthhours)), data = gridseq_ocf, family = poisson(),  control = list(adapt_delta = 0.9), iter = 2000, chain = 2, core = 2, backend = "cmdstanr")
-#saveRDS(ps_bm1, "gridanalyses/RDS/ps_bm1.rds")
-#ps_bm1 <- readRDS("gridanalyses/RDS/ps_bm1.rds")
-summary(ps_bm1)
-plot(conditional_smooths(ps_bm1))
-plot(conditional_effects(ps_bm1))
-pp_check(ps_bm1)
-
-get_elapsed_time(ps_bm1$fit)
-
-# plot with real data plotted over it
-partysize_day <- plot(conditional_smooths(ps_bm1), plot = FALSE)[[1]]
-
-
-psizeplot <- gridseq_oc %>% 
-  group_by(hour, gridtype) %>%
-  summarize_at(vars("n"), list(mean = mean, sd = sd, nsample = length)) 
-
-psizeplot$se <- psizeplot$sd/sqrt(psizeplot$nsample)
-# all in one plot
-partysize_day + labs(x = "Hour of the day", y = "Log of party size") + 
-  geom_point(data = psizeplot, aes(x = hour, y = exp(mean)), inherit.aes = FALSE)
-
-# with real points plotted on it and separate plots (real scale)
-ggplot() + geom_line(data = partysize_day$data, aes(x = hour, y = log(estimate__)-1, color = gridtype, group = gridtype), size = 2) + 
-  geom_ribbon(data = partysize_day$data, aes(x = hour, ymin = log(lower__)-1, ymax = log(upper__)-1), alpha = 0.2) +
-  scale_color_manual(values = c("#81A956", "#C8800F")) + facet_wrap(~gridtype) +
-  geom_point(data = psizeplot, aes(x = hour, y = mean, color = gridtype, alpha = nsample),  size = 2, inherit.aes = FALSE) +
-  geom_errorbar(data = psizeplot, aes(x = hour, ymin = mean - se, 
-                                      ymax =  mean + se, color= gridtype, alpha = nsample),
-                width=.4, linewidth = 1.5) +
-  labs(x = "Hour of the day", y = "Estimated party size per sequence") +  theme_bw() + 
-  theme(strip.text.x = element_text(size = 16), axis.title = element_text(size = 16), legend.text =  element_text(size = 14), legend.title = element_text(size =14),
-        axis.text = element_text(size = 12)) 
-
-# without real points
-ggplot() + geom_line(data = partysize_day$data, aes(x = hour, y = log(estimate__), color = gridtype, group = gridtype), size = 1) + 
-  geom_ribbon(data = partysize_day$data, aes(x = hour, ymin = log(lower__), ymax = log(upper__)), alpha = 0.2) + facet_wrap(~gridtype) +
-  labs(x = "Hour of the day", y = "Estimated party size per sequence") +scale_color_manual(values = c("#81A956", "#C8800F")) + theme_bw()
-
-# conditional effects instead of conditional smooths
-partysize_day2 <- plot(conditional_effects(ps_bm1), plot = FALSE)[[3]]
-#saveRDS(partysize_day2, "gridanalyses/RDS/partysize_day2.rds")
-#partysize_day2 <- readRDS("gridanalyses/RDS/partysize_day2.rds")
-# all in one plot
-partysize_day2 + labs(y = "Hour of the day", x = "Log of party size")
-
-ggplot() + geom_line(data = partysize_day2$data, aes(x = hour, y = estimate__, color = gridtype, group = gridtype), size = 2) + 
-  geom_ribbon(data = partysize_day2$data, aes(x = hour, ymin = lower__, ymax = upper__), alpha = 0.2) +
-  scale_color_manual(values = c("#81A956", "#C8800F")) + facet_wrap(~gridtype) +
-  geom_point(data = psizeplot, aes(x = hour, y = mean, color = gridtype, alpha = nsample),  size = 2, inherit.aes = FALSE) +
-  geom_errorbar(data = psizeplot, aes(x = hour, ymin = mean - se, 
-                                      ymax =  mean + se, color= gridtype, alpha = nsample),
-                width=.4, linewidth = 1.5) +
-  labs(x = "Hour of the day", y = "Estimated party size per sequence") +  theme_bw() + 
-  theme(strip.text.x = element_text(size = 16), axis.title = element_text(size = 16), legend.text =  element_text(size = 14), legend.title = element_text(size =14),
-        axis.text = element_text(size = 12)) +
-  coord_cartesian(ylim = c(1,2.5))
-
-# normal poisson
-ps_bm1_p <- brm(n ~ s(hour, by = gridtype) + gridtype +  s(locationfactor, bs = "re") + offset(log(deplengthhours)), data = gridseq_oc, family = poisson(),  control = list(adapt_delta = 0.9), iter = 2000, chain = 2, core = 2, backend = "cmdstanr")
-summary(ps_bm1_p)
-mcmc_plot(ps_bm1_p)
-plot(conditional_smooths(ps_bm1_p))
-plot(conditional_effects(ps_bm1_p, re_formula =  NULL))
-pp_check(ps_bm1_p)
-
-
-# conditional effects instead of conditional smooths
-partysize_day2p <- plot(conditional_effects(ps_bm1_p, re_formula = NULL), plot = FALSE)[[3]]
-
-ggplot() + geom_point(data = psizeplot, aes(x = hour, y = mean, color = gridtype, alpha = nsample),  size = 2, inherit.aes = FALSE) +
-  geom_errorbar(data = psizeplot, aes(x = hour, ymin = mean - se, 
-                                      ymax =  mean + se, color= gridtype, alpha = nsample),
-                width=.4, linewidth = 1.5) +
-  geom_line(data = partysize_day2p$data, aes(x = hour, y = estimate__, color = gridtype, group = gridtype), size = 2) + 
-  geom_ribbon(data = partysize_day2p$data, aes(x = hour, ymin = lower__, ymax = upper__, fill = gridtype), alpha = 0.1) +
-  scale_color_manual(values = c("#81A956", "#C8800F")) +   scale_fill_manual(values = c("#81A956", "#C8800F")) + facet_wrap(~gridtype) +
-  labs(x = "Hour of the day", y = "Estimated party size per sequence") +  theme_bw() + 
-  theme(strip.text.x = element_text(size = 16), axis.title = element_text(size = 16), legend.text =  element_text(size = 14), legend.title = element_text(size =14),
-        axis.text = element_text(size = 12)) + coord_cartesian(ylim = c(0.5,3))
-
-# only gam, not real points
-ggplot() +   geom_line(data = partysize_day2p$data, aes(x = hour, y = estimate__, color = gridtype, group = gridtype), size = 2) + 
-  geom_ribbon(data = partysize_day2p$data, aes(x = hour, ymin = lower__, ymax = upper__, fill = gridtype), alpha = 0.1) +
-  scale_color_manual(values = c("#81A956", "#C8800F")) +   scale_fill_manual(values = c("#81A956", "#C8800F")) + facet_wrap(~gridtype) +
-  labs(x = "Hour of the day", y = "Estimated party size per sequence") +  theme_bw() + 
-  theme(strip.text.x = element_text(size = 16), axis.title = element_text(size = 16), legend.text =  element_text(size = 14), legend.title = element_text(size =14),
-        axis.text = element_text(size = 12)) + coord_cartesian(ylim = c(0.5,3))
-
-
-
-### Seems like a continuous time modeling would be better
-# but in the meantime, probably already adding in the zero's, and then modeling it as a two-point process (probability of capuchins yes/no, then if capuchins how many) 
-# will need to add in 0's for all hours that are now not in
-# and for other hours calculate average number of capuchins OR just keep all the other counts intact?
-
-## agoutiselect2 is dataframe with 0's in
-head(agoutiselect2)
-# filter down to cameras we want for grid
-gridselect2 <- agoutiselect2[which(agoutiselect2$locationName %in% gridsequence_c$locationName),]
-gridselect2 <- droplevels.data.frame(gridselect2)
-
-## create variable for average nr of capuchins in sequence per hour
-gridselect2$dayhour <- paste(gridselect2$seqday, gridselect2$hour, sep = " ")
-
-nrow(gridseq_oc)
-# should be 3807 sequences with capuchins
-
-griddayhour <- aggregate(gridselect2$n, by = list(dayhour = gridselect2$dayhour, uniqueloctag = gridselect2$uniqueloctag), FUN = mean)
-colnames(griddayhour) <- c("dayhour", "uniqueloctag", "n_mean")
-
-gridselect2$identifier <- paste(gridselect2$uniqueloctag, gridselect2$dayhour, sep = "-")
-grid_dh <- gridselect2[!duplicated(gridselect2$identifier),]
-grid_dh <- left_join(grid_dh, griddayhour, c("uniqueloctag", "dayhour"))
-grid_dh <- grid_dh[,c("locationfactor", "seqday", "hour", "dayhour", "n_mean", "deplengthhours")]
-grid_dh$gridtype <- factor(ifelse(str_detect(grid_dh$locationfactor, "NTU") == TRUE, "NTU", "TU"))
-grid_dh <- droplevels.data.frame(grid_dh)
-
-
-# add 0's to other dataframe
-gridseq_oc$dayhour <- paste(gridseq_oc$seqday, gridseq_oc$hour, sep = " ")
-grid_dh2 <- gridseq_oc[,c("locationfactor", "seqday", "hour", "dayhour", "n", "deplengthhours", "gridtype")]
-grid_dh0 <- grid_dh[grid_dh$n_mean == 0,]
-colnames(grid_dh0) <- c("locationfactor", "seqday", "hour", "dayhour", "n", "deplengthhours", "gridtype")
-grid_dht <- rbind(grid_dh0, grid_dh2)
-
-## exclude night 0's (not night detections!!) between 19 and 5 (this is being quite broad)
-grid_dht <- grid_dht[!(grid_dht$n == 0 & (grid_dht$hour > 18 | grid_dht$hour < 6)),]
-
-grid_dht[order(grid_dht$locationfactor, grid_dht$seqday, grid_dht$hour),]
-## STILL NEED TO BE MORE THOROUGH AND CHECK IF THERE'S NOW NO DAYHOUR THAT HAS BOTH A 0 AND A NUMBER (SHOULD NOT HAPPEN)
-
-## mgcv
-ps_gam1 <- gam(list(n ~ s(hour, by = gridtype) + gridtype + s(locationfactor, bs = "re"), ~ s(hour, by = gridtype) + gridtype + s(locationfactor, bs = "re")), offset = log(deplengthhours), data = grid_dht, family = ziplss())
-summary(ps_gam1)
-plot(ps_gam1)
-
-new_data <- tidyr::expand(grid_dht, nesting(locationfactor), hour = unique(hour), gridtype = unique(gridtype))
-
-m5_pred <- bind_cols(new_data,
-                     as.data.frame(predict(ps_gam1, newdata = new_data, type = "link")))
-# V1 is predicted value of response from Poisson part of model on scale of linear predictor (log scale)
-# V2 is predicted value of zero-inflation component and is on log-log scale
-# need to transform them back and multiply together to get actual predicted values
-ilink <- binomial(link = "cloglog")$linkinv # to transform log-log back
-m5_pred$fit <- exp(m5_pred$V1)*ilink(m5_pred$V2)
-
-ggplot(m5_pred, aes(x = hour, y = fit, group = gridtype, color = gridtype)) +
-  geom_line() +
-  facet_wrap(~ gridtype)
-head(m5_pred)
-
-## brms model
-
-## STILL RUN THIS OVERNIGHT? WILL TAKE A WHILE I THINK
-
-ps_bm1b <- brm(n ~ s(hour, by = gridtype) + gridtype + s(locationfactor, bs = "re") + offset(log(deplengthhours)), data = grid_dht, family = hurdle_poisson(link = "log"),  iter = 2000, chain = 2, core = 2, backend = "cmdstanr")
-#saveRDS(ps_bm1b, "gridanalyses/RDS/ps_bm1b.rds")
-ps_bm1b <- readRDS("gridanalyses/RDS/ps_bm1b.rds")
+#saveRDS(ps_bm1b), "gridanalyses/RDS/ps_bm1b.rds")
+#ps_bm1b <- readRDS("gridanalyses/RDS/ps_bm1b.rds")
 summary(ps_bm1b)
-plot(conditional_smooths(ps_bm1b))
-pp_check(ps_bm1b)
-
-# plot with real data plotted over it
-partysize_dayb <- plot(conditional_smooths(ps_bm1b), plot = FALSE)[[1]]
-# all in one plot
-partysize_dayb + labs(x = "Hour of the day", y = "Log of party size")
-
-# with real points plotted on it and separate plots (real scale)
-ggplot() + geom_line(data = partysize_dayb$data, aes(x = hour, y = log(estimate__), color = gridtype, group = gridtype), size = 1) + 
-  geom_ribbon(data = partysize_dayb$data, aes(x = hour, ymin = log(lower__), ymax = log(upper__)), alpha = 0.2) + facet_wrap(~gridtype) +
-  stat_summary(data = grid_dht, aes(x = hour, y = n, color = gridtype, group = gridtype), fun = mean, geom = "point", inherit.aes = FALSE) +
-  labs(x = "Hour of the day", y = "Estimated party size per sequence") + theme_bw()
-
+plot(conditional_effects(ps_bm1b))
+hypothesis(ps_bm1b, "Intercept  > Intercept + gridtypeTU", alpha = 0.05)
 
 ##### PARTY COMPOSITION ####
+
+###### 1: Adult males and adult females ####
+
 # try zero-inflated poisson number of adult  females in a sequence (in dataframe only capuchin detections. TU vs NTU)
 # same for adult males
 # then combine the likelihood functions into one model? 
@@ -745,7 +379,7 @@ pp_check(pc_bm2)
 # also higher number of males per sequence in NTU than TU grid
 
 #combining?
-pc_bm3 <- brm(nAF ~ gridtype*nAM + offset(log(deplengthhours)) + (1|locationfactor), data = gridseq_oc, family = zero_inflated_poisson(link = "log", link_zi = "logit"), iter = 2000, chain = 2, core = 2, backend = "cmdstanr")
+pc_bm3 <- brm(nAF ~ gridtype*nAM + offset(log(deplengthhours)) + (1|locationfactor), data = gridseq_ocf, family = zero_inflated_poisson(link = "log", link_zi = "logit"), iter = 2000, chain = 2, core = 2, backend = "cmdstanr")
 #saveRDS(pc_bm3, "gridanalyses/RDS/pc_bm3.rds")
 #pc_bm3 <- readRDS("gridanalyses/RDS/pc_bm3.rds")
 plot(conditional_effects(pc_bm3))
@@ -757,7 +391,7 @@ hypothesis(pc_bm3, "Intercept > Intercept + gridtypeTU")
 # plot with real data plotted over it
 partycomp <- plot(conditional_effects(pc_bm3), plot = FALSE)[[3]]
 
-pcompplot <- gridseq_oc %>% 
+pcompplot <- gridseq_ocf %>% 
   group_by(nAM, gridtype) %>%
   summarize_at(vars("nAF"), list(mean = mean, sd = sd, nsample = length))
 
@@ -785,6 +419,12 @@ ggplot() +  scale_color_manual(values = c("#81A956", "#C8800F")) + scale_fill_ma
   theme(strip.text.x = element_text(size = 16), axis.title = element_text(size = 16), legend.text =  element_text(size = 14), legend.title = element_text(size =14),
         axis.text = element_text(size = 12)) 
 
+###### 2: Adults and juveniles ####
+pc_bm4 <- brm(nJuvenile ~ gridtype*nAdults + offset(log(deplengthhours)) + (1|locationfactor), data = gridseq_ocf, family = zero_inflated_poisson(link = "log", link_zi = "logit"), iter = 2000, chain = 2, core = 2, backend = "cmdstanr")
+
+
+###### SPATIAL COHESION #####
+
 ##### CO-OCCURRENCES ####
 
 ## Step 1: Generate distance matrix showing distance between each camera per grid
@@ -801,7 +441,7 @@ NTUdistmat
 ### Using all TU data (not just grid), looking for co-occurrences within 60 seconds >150 m away
 # exclude sequences with unfamiliar individuals (from grid) and CEBUS-03 (duplicate)
 agoutiseq_jt <- agoutisequence_c[agoutisequence_c$capuchin == 1 & agoutisequence_c$island == "Jicaron" & agoutisequence_c$tool_site == 1 & !agoutisequence_c$locationfactor == "CEBUS-03",]
-unfamiliars <- agouticlean$sequenceID[which(str_detect(agouticlean$comments.x, "unfamiliar") == TRUE & agouticlean$tool_site == 1 & agouticlean$island == "Jicaron")]
+unfamiliars <- agouticlean$sequenceID[which(str_detect(agouticlean$observationComments, "unfamiliar") == TRUE & agouticlean$tool_site == 1 & agouticlean$island == "Jicaron")]
 agoutiseq_jt <- agoutiseq_jt[! agoutiseq_jt$sequenceID %in% unfamiliars,]
 
 # make distance matrix for all cameras
@@ -1680,11 +1320,11 @@ hist(gridsequence_c$n[gridsequence_c$gridtype == "NTU"])
 # level of observation
 str(agouticlean)
 agouticlean_jt <- agouticlean[agouticlean$island == "Jicaron" & agouticlean$tool_site == 1,]
-v <- as.data.frame(ftable(agouticlean_jt$name))
+v <- as.data.frame(ftable(agouticlean_jt$individualID))
 # IDs where we have many observations
 ids <- as.character(v$Var1[which(v$Freq > 20)])
 
-agouticlean_jti <- agouticlean_jt[agouticlean_jt$name %in% ids,]
+agouticlean_jti <- agouticlean_jt[agouticlean_jt$individualID %in% ids,]
 # number of 1 sequences
 ggplot(data = agouticlean_jti, aes(x = n)) + geom_histogram(stat = "count") + facet_wrap(~name, scales = "free")
 

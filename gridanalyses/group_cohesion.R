@@ -42,20 +42,21 @@ library(fitdistrplus)
 # --> have this information on Kobo, can add it to the csv with camera information? --> this is incomplete
 # will need to find out how to calculate detection distance from camera images
 
-##### DIAGNOSTICS ####
-
+##### DIAGNOSTICS & FILTERING ####
 ## Subset to only grid cameras
-# observation level
+# observation level dataframe 
 gridclean <- agouticlean[which(str_detect(agouticlean$locationName, "TU") == TRUE),]
 ftable(gridclean$locationName)
 # sequence level
 gridsequence <- agoutisequence_c[which(str_detect(agoutisequence_c$locationName, "TU") == TRUE),]
 ftable(gridsequence$locationName)
 
-## exclude grid cameras that are blank
-# NTU-151 and TU-168 have only blanks, TU-152 was pointed at the ground and therefore had mostly blanks from the start. For now exclude these three
+## exclude grid cameras that are blank due to malfunctions
+# NTU-151 and TU-168 have only blanks, TU-152 was pointed at the ground and therefore had mostly blanks from the start. Exclude these three.
 gridclean_c <- gridclean[! gridclean$locationName %in% c("NTU-151", "TU-168", "TU-152"),]
+# differentiate tool user and non tool user grid
 gridclean_c$gridtype <- ifelse(str_detect(gridclean_c$locationName, "NTU") == TRUE, "NTU", "TU")
+gridclean_c <- droplevels.data.frame(gridclean_c)
 
 gridsequence_c <-  gridsequence[! gridsequence$locationName %in% c("NTU-151", "TU-168", "TU-152"),]
 gridsequence_c$gridtype <- ifelse(str_detect(gridsequence_c$locationName, "NTU") == TRUE, "NTU", "TU")
@@ -65,38 +66,35 @@ gridsequence_c <- droplevels.data.frame(gridsequence_c)
 
 ## Did we have at least one capuchin detection at all remaining cameras?
 ftable(gridsequence_c[which(gridsequence_c$capuchin == 1),]$locationName)
-
 ## any weird time issues?
 hist(gridsequence_c[which(gridsequence_c$capuchin == 1),]$hour)
-# all looks fine
 
-# filter down to only capuchin detections
+# filter down to only capuchin detections and minor cleaning
 gridseq_oc <- gridsequence_c[gridsequence_c$capuchin == 1,]
 gridseq_oc$gridtype <- as.factor(gridseq_oc$gridtype)
 gridseq_oc$deplengthhours <- gridseq_oc$dep_length_hours
 gridseq_oc <- droplevels.data.frame(gridseq_oc)
 
 ## Filter out detections of unfamiliar individuals
-#
-unfamiliars <-gridseq_oc$sequenceID[which(str_detect(gridseq_oc$comments.x, "unfamiliar") == TRUE)]
+unfamiliars <-gridseq_oc$sequenceID[which(str_detect(gridseq_oc$observationComments, "unfamiliar|Unfamiliar") == TRUE)]
 gridseq_ocf <- gridseq_oc[! gridseq_oc$sequenceID %in% unfamiliars,]
 # how successful were we at assigning IDs and age sex
 ftable(gridseq_ocf$agesex, gridseq_ocf$toolusers)
-ftable(gridseq_ocf$name, gridseq_ocf$toolusers)
+ftable(gridseq_ocf$individualID, gridseq_ocf$toolusers)
 
 # visualize activity at the different cameras
 gridcamerasmap <- as.data.frame(ftable(gridseq_oc$locationName))
 colnames(gridcamerasmap) <- c("locationName", "ncapseq")
 gridcamerasmap <- left_join(gridcamerasmap, gridseq_oc[!duplicated(gridseq_oc$locationName),c("locationName", "longitude", "latitude")], by = "locationName")
 # locations with unfamiliar sightings
-unfamiliarsloc <- gridseq_oc$locationName[which(str_detect(gridseq_oc$comments.x, "unfamiliar") == TRUE)]
+unfamiliarsloc <- gridseq_oc$locationName[which(str_detect(gridseq_oc$observationComments, "unfamiliar|Unfamiliar") == TRUE)]
 gridcamerasmap$unfamiliar <- ifelse(gridcamerasmap$locationName %in% unfamiliarsloc, 1.2, 1)
 gridcammap <- st_as_sf(gridcamerasmap, coords = c("longitude", "latitude"), crs = 4326)
 
 mapview(gridcammap, zcol = "ncapseq", at = c(0, 50, 100, 200, 300, 400), legend = TRUE)
 
-###### Exposure, how many trapping nights TU vs NTU ####
-## How many camera trapping days
+###### Exposure ####
+## How many camera trapping days at TU vs NTU
 griddays <- gridsequence_c
 griddays$dayloc <- paste(griddays$locationfactor, griddays$seqday, sep = " ")
 griddays2 <- griddays[!duplicated(griddays$dayloc),]
@@ -126,10 +124,9 @@ ftable(gridlocations_t2$gridtype) # one more location in NTU grid
 # Average number of trapping days per location
 summary(as.numeric(gridlocations_t2$x[gridlocations_t2$gridtype == "NTU"]))
 summary(as.numeric(gridlocations_t2$x[gridlocations_t2$gridtype == "TU"]))
-
 # slightly longer deployments in NTU grid than TU grid, but no dramatic differences
 
-##### Distance from placed cameras to original GPS coordinates #####
+####### Distance from placed cameras to planned GPS coordinates ####
 # load in files with original GPS coordinates
 head(gridsequence_c)
 
@@ -154,16 +151,16 @@ NTUgridcams_planreal <- NTUgridcams_planreal %>%
   mutate(
     dist = geosphere::distHaversine(cbind(longitude, latitude), cbind(X, Y))
   )
-
 NTUgridcams_planreal
 
 summary(c(TUgridcams_planreal$dist, NTUgridcams_planreal$dist))
 
-##### Are we capturing one NTU group? ####
+###### One NTU group? ####
+# checking if we are capturing a single NTU group or multiple?
 # max group size seen
 NTUgridseq <- gridseq_ocf[gridseq_ocf$gridtype == "NTU",]
 NTUgridseq[which(NTUgridseq$n == max(NTUgridseq$n)),]
-# in max group size, see 4 adult females, 5 adult males, 5 juveniles (of which one infant), 2 subadult males
+# in max group size, see 4 adult females, 4 adult males, 5 juveniles (of which one infant)
 
 # look at supposed group composition (max number of adult males and adult females seen in one sequence and how many we have IDed)
 max(NTUgridseq$nAF) # max of 4 adult females (have identified 5)
@@ -172,32 +169,25 @@ max(NTUgridseq$nJU) # max of 6 juveniles
 max(NTUgridseq$nSM) # max of 2 subadult males ( have identified 2, maybe 3)
 
 # co-occurrence of identifiable individuals (SNA network)
-# look at who occurs together in the same sequence. get nodes and see who has not been seen with anyone. 
-# step 1: working with gridclean dataframe, need to turn the IDstrings into the ID key codes we use for clarity.
-# step 2: per sequence, get some kind of dyadic information of who was seen with whom
-
-# make dataframe with individual variation
-gridagesex <- gridclean_c[,c("name","lifeStage", "sex", "gridtype")]
-gridagesex <- gridagesex[! is.na(gridagesex$name) == TRUE & ! duplicated(gridagesex$name),]
+# make dataframe with individual information
+gridagesex <- gridclean_c[,c("individualID","lifeStage", "sex", "gridtype")]
+gridagesex <- gridagesex[! is.na(gridagesex$individualID) == TRUE & ! duplicated(gridagesex$individualID),]
 NTUgridagesex <- gridagesex[gridagesex$gridtype == "NTU",]
 # for now just add real names in manually, later use key file
 NTUgridagesex$col <- ifelse(NTUgridagesex$sex == "male", "lightblue", "pink")
 NTUgridagesex$col <- ifelse(NTUgridagesex$lifeStage == "adult", NTUgridagesex$col, "lightgreen")
-NTUgridagesex <- NTUgridagesex[order(NTUgridagesex$name),]
+NTUgridagesex <- NTUgridagesex[order(NTUgridagesex$individualID),]
 
 # I think data format needs to be sequenceID/individualID
 # go to only NTU grid data and only sequence ID and individual ID (when individual ID was known)
-NTUassoc <- gridclean_c[gridclean_c$gridtype == "NTU" & ! is.na(gridclean_c$name) == TRUE, c("sequenceID", "name")]
+NTUassoc <- gridclean_c[gridclean_c$gridtype == "NTU" & ! is.na(gridclean_c$individualID) == TRUE, c("sequenceID", "individualID")]
 
 # then go from long to wide?
-NTUassoc_w <- dcast(NTUassoc, sequenceID ~ name)
+NTUassoc_w <- dcast(NTUassoc, sequenceID ~ individualID, fun.aggregate = length )
 NTUassoc_w2 <- NTUassoc_w
-NTUassoc_w2[is.na(NTUassoc_w2) == FALSE] <- 1
-NTUassoc_w2$sequenceID <- NTUassoc_w$sequenceID
-NTUassoc_w2[is.na(NTUassoc_w2)] <- 0
 NTUassoc_w2[,2:15] <- as.numeric(unlist(NTUassoc_w2[,2:15]))
 rownames(NTUassoc_w2) <- NTUassoc_w2$sequenceID
-NTUassoc_w2 <- NTUassoc_w2[,-1]
+NTUassoc_w2 <- NTUassoc_w2[,-c(1,2)]
 ## now we have a dataframe with all associations (whenever individuals were seen together in the same sequence) in GBI (group by individual) format
 # use this with asnipe package to get a network 
 adj.m <- get_network(NTUassoc_w2, association_index = "SRI")
@@ -209,34 +199,28 @@ plot(net_NTU, vertex.color = NTUgridagesex$col, edge.width = E(assoc.g)$weight*1
 coms_NTU <- fastgreedy.community(net_NTU) #identify communities
 NTUgridagesex$COM <- membership(coms_NTU) #assign membership of communities
 plot(net_NTU, vertex.color =NTUgridagesex$col, edge.with = 20*E(net_NTU)$weight^2, mark.groups = coms_NTU)
-
-# largely appears to be one group, only Drop and Kai are unsure, but they were also only seen very rarely 
-
 ### SNA TU GROUP ##########
-TUassoc <- gridclean_c[gridclean_c$gridtype == "TU"  & ! is.na(gridclean_c$name) == TRUE, c("sequenceID", "name")]
+TUassoc <- gridclean_c[gridclean_c$gridtype == "TU"  & ! is.na(gridclean_c$individualID) == TRUE, c("sequenceID", "individualID")]
 
 # make dataset with all unique individuals and their age-sex
 head(gridseq_ocf)
-inds <- gridclean_c[!duplicated(gridclean_c$name) & gridclean_c$gridtype == "TU", c("name", "lifeStage", "sex")]
+inds <- gridclean_c[!duplicated(gridclean_c$individualID) & gridclean_c$gridtype == "TU", c("individualID", "lifeStage", "sex")]
 inds <- inds[-1,]
 inds$col <- NA
-inds$lifeStage[inds$name %in% c("SPT (Spot)", "LAR (Larry)")] <- "subadult"
+inds$lifeStage[inds$individualID %in% c("SPT (Spot)", "LAR (Larry)")] <- "subadult"
 inds$col[which(inds$sex == "male"  & inds$lifeStage == "adult")] <- "lightblue"
 inds$col[which(inds$sex == "female" & inds$lifeStage == "adult")] <- "pink"
 inds$col[which(inds$sex == "male"  & inds$lifeStage != "adult")] <- "lightgreen"
 inds$col[which(inds$sex == "female" & inds$lifeStage != "adult")] <- "purple"
 
-inds <- inds[order(inds$name),]
+inds <- inds[order(inds$individualID),]
 
 # then go from long to wide?
-TUassoc_w <- dcast(TUassoc, sequenceID ~ name)
+TUassoc_w <- dcast(TUassoc, sequenceID ~ individualID)
 TUassoc_w2 <- TUassoc_w
-TUassoc_w2[is.na(TUassoc_w2) == FALSE] <- 1
-TUassoc_w2$sequenceID <- TUassoc_w$sequenceID
-TUassoc_w2[is.na(TUassoc_w2)] <- 0
 TUassoc_w2[,2:16] <- as.numeric(unlist(TUassoc_w2[,2:16]))
 rownames(TUassoc_w2) <- TUassoc_w2$sequenceID
-TUassoc_w2 <- TUassoc_w2[,-c(1)]
+TUassoc_w2 <- TUassoc_w2[,-c(1,2)]
 TUassoc_w2 <- TUassoc_w2[,sort(colnames(TUassoc_w2))]
 
 ## now we have a dataframe with all associations (whenever individuals were seen together in the same sequence) in GBI (group by individual) format
@@ -813,7 +797,7 @@ NTUdistmat
 ### Using all TU data (not just grid), looking for co-occurrences within 60 seconds >150 m away
 # exclude sequences with unfamiliar individuals (from grid) and CEBUS-03 (duplicate)
 agoutiseq_jt <- agoutisequence_c[agoutisequence_c$capuchin == 1 & agoutisequence_c$island == "Jicaron" & agoutisequence_c$tool_site == 1 & !agoutisequence_c$locationfactor == "CEBUS-03",]
-unfamiliars <- agouticlean$sequenceID[which(str_detect(agouticlean$comments.x, "unfamiliar") == TRUE & agouticlean$tool_site == 1 & agouticlean$island == "Jicaron")]
+unfamiliars <- agouticlean$sequenceID[which(str_detect(agouticlean$observationComments, "unfamiliar") == TRUE & agouticlean$tool_site == 1 & agouticlean$island == "Jicaron")]
 agoutiseq_jt <- agoutiseq_jt[! agoutiseq_jt$sequenceID %in% unfamiliars,]
 
 # make distance matrix for all cameras

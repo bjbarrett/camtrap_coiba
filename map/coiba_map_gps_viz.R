@@ -5,10 +5,11 @@ library(rgdal)
 library(sf)
 library(raster)
 ##### load camera traps
-cam_ids <- read.csv(file="map/coiba_camtrap_ids_gps.csv") #generated with this script file https://github.com/bjbarrett/camtrap_coiba/blob/main/coiba_camtrap_gps_visualization.R
+cam_ids <- read.csv(file="coiba_camtrap_ids_gps.csv") #generated with this script file https://github.com/bjbarrett/camtrap_coiba/blob/main/coiba_camtrap_gps_visualization.R
 all_cams <- st_as_sf(cam_ids , coords = c("longitude", "latitude"), crs = 4326) #do it again if rading csv
-all_cams_map <- mapview(all_cams , col.regions="gold"  )
-
+all_cams$toolusers <- ifelse(all_cams$tool_site == 1, "Tool-using", "Non-tool-using")
+all_cams_map <- mapview(all_cams , zcol = "toolusers"  )
+all_cams_map
 #filelist <- list.files(path="~/Dropbox/camtrap_coiba/map/gpx/bjb_raw_garmin_folders" , full.names=TRUE)
 filelist <- list.files(path="map/gpx/bjb_raw_garmin_folders" , full.names=TRUE)
 
