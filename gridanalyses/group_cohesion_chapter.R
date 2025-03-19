@@ -263,6 +263,25 @@ legend("topright", c("TU", "NTU"), col=c("#C8800F","#81A956"), lty=c(1,5), lwd=2
 compareCkern(act_m1, act_m2, reps = 100)
 # 0.896448990 lot of overlap
 
+
+
+# brms default for zero inflated poisson
+brms_default2 <- c(prior(student_t(3, -2.3, 2.5), class = Intercept),
+                   prior(student_t(3, 0, 2.5), class = sd),
+                   prior(normal(0, 99999), class = b)) #flat prior
+
+# brms default for bernoulli
+brms_default3 <- c(prior(student_t(3, 0, 2.5), class = Intercept),
+                   prior(student_t(3, 0, 2.5), lb = 0, class = sd),
+                   prior(normal(0, 99999), class = b)) #flat prior
+
+# our prior for poisson
+normal_prior <- c(prior(normal(0, 1), class = Intercept),
+                  prior(normal(0,1), class = b),
+                  prior(exponential(1), class = sd))
+
+############# GOT UNTIL HERE WITH CLEANING ############
+
 ##### PARTY SIZE ####
 
 ###### 1: Mean party size ####
@@ -279,19 +298,74 @@ max(gridseq_ocf$n[gridseq_ocf$gridtype == "TU"])
 gridseq_ocf$partysize <- gridseq_ocf$n - 1
 hist(gridseq_ocf$partysize)
 
-sps_bm1a <-  brm(bf(partysize ~ gridtype + (1|locationfactor) + offset(log(deplengthhours)), hu ~ gridtype + (1|locationfactor)), 
-                 data = gridseq_ocf, family = hurdle_poisson(), iter = 2000, chain = 2, core = 2, backend = "cmdstanr")
+### Model sps_bm1a ###
+# Outcome: social party size
+# Fixed effects: gridtype
+# Random effects: camera location
+# Offset: log of deployment length in hours
+
+## PRIOR PREDICTIVE SIMULATION
+# compare default brms prior to what we want to set
+# brms default for hurdle poisson
+# obtained by running model sps_bm1a without prior and then doing get_prior
+brms_default_hp <- c(prior(student_t(3, -10.8, 2.5), class = Intercept), # informed by our data
+                     prior(logistic(0,1), class = Intercept, dpar = hu),
+                     prior(student_t(3, 0, 2.5), class = sd),
+                     prior(student_t(3,0,2.5), class = sd, dpar = hu),
+                     prior(normal(0, 99999), class = b),
+                     prior(normal(0, 99999), class = b, dpar = hu)) #flat prior
+
+# hurdle poisson default prior brms
+sps_bm1a_prior <- brm(bf(partysize ~ gridtype + (1|locationfactor) + offset(log(deplengthhours)), hu ~ gridtype + (1|locationfactor)), prior = brms_default_hp,
+                  data = gridseq_ocf, family = hurdle_poisson(), iter = 2000, chain = 2, core = 2, backend = "cmdstanr", sample_prior = "only")
+
+summary(sps_bm1a_prior)
+prior_summary(sps_bm1a_prior)
+mcmc_plot(sps_bm1a_prior)
+plot(sps_bm1a_prior)
+# complete flat prior on the estimates seems excessive
+
+# our prior for hurdle poisson, slightly less flat
+brms_our_hp <- c(prior(normal(0,1), class = Intercept), 
+                 prior(logistic(0,1), class = Intercept, dpar = hu),
+                 prior(normal(0,2.5), lb = 0, class = sd),
+                 prior(normal(0,2.5), lb = 0, class = sd, dpar = hu),
+                 prior(normal(0,1), class = b),
+                 prior(normal(0,1), class = b, dpar = hu)) 
+
+# our prior (with normal (0,1) instead of flat prior. 
+sps_bm1a_prior2 <-  brm(bf(partysize ~ gridtype + (1|locationfactor) + offset(log(deplengthhours)), hu ~ gridtype + (1|locationfactor)), prior = brms_our_hp,
+                        data = gridseq_ocf, family = hurdle_poisson(), iter = 2000, chain = 2, core = 2, backend = "cmdstanr", sample_prior = "only")
+
+summary(sps_bm1a_prior2)
+prior_summary(sps_bm1a_prior2)
+mcmc_plot(sps_bm1a_prior2)
+plot(sps_bm1a_prior2)
+
+# use our weakly informative prior
+sps_bm1a <-  brm(bf(partysize ~ gridtype + (1|locationfactor) + offset(log(deplengthhours)), 
+                    hu ~ gridtype + (1|locationfactor)), data = gridseq_ocf, family = hurdle_poisson(), 
+                 iter = 3000, chain = 3, core = 3, backend = "cmdstanr", prior = brms_our_hp, 
+                 save_pars = save_pars(all = TRUE), seed = 1234567)
+# sps_bm1a <- add_criterion(sps_bm1a, c("loo", "loo_R2", "bayes_R2"), reloo = TRUE, backend = "cmdstanr", ndraws = 3000) 
+
 #saveRDS(sps_bm1a, "gridanalyses/RDS/sps_bm1a.rds")
 #sps_bm1a <- readRDS("gridanalyses/RDS/sps_bm1a.rds")
 
+# Diagnostics
 summary(sps_bm1a)
 plot(sps_bm1a)
 plot(conditional_effects(sps_bm1a))
 pp_check(sps_bm1a)
+
+loo(sps_bm1a) 
+loo_R2(sps_bm1a) # 0.07
+round(bayes_R2(sps_bm1a),2) # 0.06
+
 hypothesis(sps_bm1a, "Intercept > Intercept + gridtypeTU")
+hypothesis(sps_bm1a, "hu_Intercept < hu_Intercept + hu_gridtypeTU")
 
 # Interpretation
-# https://www.andrewheiss.com/blog/2022/05/09/hurdle-lognormal-gaussian-brms/
 tidy(sps_bm1a)
 # probability of a 0 (party of 1) in NTU
 hurdle_intercept <- tidy(sps_bm1a) |> 
@@ -302,9 +376,8 @@ plogis(hurdle_intercept)
 hurdle_TU <- tidy(sps_bm1a) |>
   filter(term == "hu_gridtypeTU") |>
   pull(estimate)
-
 (plogis(hurdle_intercept + hurdle_TU) - plogis(hurdle_intercept)) * 100
-# tool using group increases probability of a 0 (party of 1) by 2.03 percentage points, on average
+# tool using group increases probability of a 0 (party of 1) by 1.90 percentage points, on average
 
 # conditional effects of 0/not 0 
 plot(conditional_effects(sps_bm1a, dpar = "hu"))
@@ -318,17 +391,21 @@ emmeans(sps_bm1a, "gridtype", dpar = "hu", regrid = "response")
 emmeans(sps_bm1a, "gridtype", dpar = "mu", regrid = "response")
 emmeans(sps_bm1a, "gridtype", regrid = "response")
 
+# Visualization
+# Create multipanel plot showing hu and mu component separately
+# scrounging and total presence
+sps_huplot<- plot(conditional_effects(sps_bm1a, dpar = "hu"), plot = FALSE)
+sps_muplot <- plot(conditional_effects(sps_bm1a, dpar = "mu"), plot = FALSE)
+
+#png("gridanalyses/RDS/sps_muhuplot.png", width = 8, height = 5, units = 'in', res = 300)
+sps_huplot$gridtype + theme_bw() + labs(x = "Grid location", y = "Predicted probability of single parties (social party of 0)") +
+  theme(axis.title = element_text(size = 14),  axis.text = element_text(size = 12)) +
+sps_muplot$gridtype + theme_bw() +  labs(x = "Grid location", y = "Predicted social party size (if greater than 0)") +
+  theme(axis.title = element_text(size = 14),  axis.text = element_text(size = 12)) 
+#dev.off()  
 
 ###### 2: Variability in party size ####
-ggplot(data = gridseq_ocf, aes( x= hour, y = n, col = gridtype, shape = gridtype)) + geom_point(alpha = 0.5, aes(shape = gridtype)) + geom_smooth()
-ggplot(data = gridseq_ocf, aes( x= seqday, y = n, col = gridtype)) + geom_point(alpha = 0.5,) + geom_smooth() + facet_wrap(~gridtype)
-
-ggplot(data = gridseq_ocf[gridseq_ocf$gridtype == "TU",], aes( x= hour, y = n, col = day(seqday))) + geom_point(alpha = 0.5) + facet_wrap(~month) + scale_colour_viridis_c() 
-ggplot(data = gridseq_ocf[gridseq_ocf$gridtype == "NTU",], aes( x= hour, y = n, col = day(seqday))) + geom_point(alpha = 0.5) + facet_wrap(~month) + scale_colour_viridis_c() 
-
-head(gridseq_ocf)
-
-# per day per camera have sd deviation of party size
+# per day per camera calculate sd deviation of party size
 gridseq_daysd <- do.call(data.frame, aggregate(gridseq_ocf$n, by = list(gridseq_ocf$gridtype, gridseq_ocf$locationName, gridseq_ocf$seqday), 
                                                FUN = function(x) c(sd = sd(x), n = length(x), mn = mean(x))))
 colnames(gridseq_daysd) <- c("gridtype", "locationfactor", "seqday", "party_sd", "party_n", "party_mean")
@@ -340,46 +417,216 @@ ftable(gridseq_daysd$party_sd[gridseq_daysd$party_n == 2])
 ## determine distribution
 descdist(gridseq_daysd$party_sd)
 
-testdist1.1 <- fitdist(gridseq_daysd$party_sd, "lognormal")
-plot(testdist1.1)
+### Model ps_bm1b ###
+# Outcome: standard deviation in party size per day per camera
+# Fixed effects: gridtype
+# Random effects: camera location
+# Offset: log of number of parties observed in the day at the camera
 
-# compare sd in party size between NTU and TU. locationfactor as random effect. number of parties as offset (?) or fixed effect
+## PRIOR PREDICTIVE SIMULATION
+# compare default brms prior to what we want to set
+# brms default for hurdle poisson
+# obtained by running model sps_bm1a without prior and then doing get_prior
+brms_default_hg <- c(prior(student_t(3, -1.53, 2.5), class = Intercept), # informed by our data,
+                     prior(student_t(3, 0, 2.5), lb = 0, class = sd),
+                     prior(beta(1,1), class = hu, lb = 0, ub = 1),
+                     prior(normal(0, 99999), class = b))
+
+# hurdle poisson default prior brms
+sps_bm1b_prior <- brm(party_sd ~ gridtype + (1|locationfactor) + offset(log(party_n)), data = gridseq_daysd, prior = brms_default_hg,
+                      family = hurdle_gamma(), iter = 2000, chain = 2, core = 2, backend = "cmdstanr", sample_prior = "only")
+
+summary(sps_bm1b_prior)
+prior_summary(sps_bm1b_prior)
+mcmc_plot(sps_bm1b_prior)
+plot(sps_bm1b_prior)
+# complete flat prior on the estimates seems excessive and it doesnt converge well. hu seems ok
+
+# our prior for hurdle gamma, slightly less flat
+brms_our_hg <- c(prior(normal(0,1), class = Intercept), 
+                 prior(normal(0, 2.5), lb = 0, class = sd),
+                 prior(beta(1,1), class = hu, lb = 0, ub = 1),
+                 prior(normal(0, 1), class = b))
+
+# our prior (with normal (0,1) instead of flat prior. 
+sps_bm1b_prior2 <-  brm(party_sd ~ gridtype + (1|locationfactor) + offset(log(party_n)), data = gridseq_daysd, prior = brms_our_hg,
+                    family = hurdle_gamma(), iter = 2000, chain = 2, core = 2, backend = "cmdstanr", sample_prior = "only")
+
+summary(sps_bm1b_prior2)
+prior_summary(sps_bm1b_prior2)
+mcmc_plot(sps_bm1b_prior2)
+plot(sps_bm1b_prior2)
+
+# use our weakly informative prior
 ps_bm1b <- brm(party_sd ~ gridtype + (1|locationfactor) + offset(log(party_n)), data = gridseq_daysd, 
-               family = hurdle_gamma(), iter= 2000, chain =2, core = 2, backend = "cmdstanr")
+               family = hurdle_gamma(), iter= 3000, chain =3, core = 3, backend = "cmdstanr",
+               save_pars = save_pars(all = TRUE), seed = 1234567, prior = brms_our_hg)
+# ps_bm1b <- add_criterion(ps_bm1b, c("loo", "loo_R2", "bayes_R2"), reloo = TRUE, backend = "cmdstanr", ndraws = 3000) 
+
 #saveRDS(ps_bm1b), "gridanalyses/RDS/ps_bm1b.rds")
 #ps_bm1b <- readRDS("gridanalyses/RDS/ps_bm1b.rds")
+
+# Diagnostics
 summary(ps_bm1b)
+plot(ps_bm1b)
 plot(conditional_effects(ps_bm1b))
+pp_check(ps_bm1b)
+
+loo(ps_bm1b) 
+round(bayes_R2(ps_bm1b),2) # 0.24
+
+# Interpretation
+tidy(sps_bm1a)
+# probability of a 0 (party of 1) in NTU
+hurdle_intercept <- tidy(sps_bm1a) |> 
+  filter(term == "hu_(Intercept)") |> 
+  pull(estimate)
+plogis(hurdle_intercept)
+# probability of a 0 (party of 1) in TU
+hurdle_TU <- tidy(sps_bm1a) |>
+  filter(term == "hu_gridtypeTU") |>
+  pull(estimate)
+(plogis(hurdle_intercept + hurdle_TU) - plogis(hurdle_intercept)) * 100
+# tool using group increases probability of a 0 (party of 1) by 1.90 percentage points, on average
+
+# conditional effects of 0/not 0 
+plot(conditional_effects(sps_bm1a, dpar = "hu"))
+plot(conditional_effects(sps_bm1a, dpar = "mu"))
+# okay so see here clearly that at TU we are more likely to see a party of 1, and at NTU we see larger parties if it is not party of 1
+# and all together also slightly more likely to have larger party at NTU
+
+# using emmeans to extract estimates on real scale
+# only non-zero mu part
+emmeans(sps_bm1a, "gridtype", dpar = "hu", regrid = "response")
+emmeans(sps_bm1a, "gridtype", dpar = "mu", regrid = "response")
+emmeans(sps_bm1a, "gridtype", regrid = "response")
+
+emmeans(ps_bm1b, "gridtype", regrid = "response")
 hypothesis(ps_bm1b, "Intercept  > Intercept + gridtypeTU", alpha = 0.05)
 
 ##### PARTY COMPOSITION ####
 
 ###### 1: Adult males and adult females ####
 
-# try zero-inflated poisson number of adult  females in a sequence (in dataframe only capuchin detections. TU vs NTU)
-# same for adult males
-# then combine the likelihood functions into one model? 
-pc_bm1 <- brm(nAF ~ gridtype + offset(log(deplengthhours)) + (1|locationfactor), data = gridseq_ocf, family = zero_inflated_poisson(link = "log", link_zi = "logit"), iter = 2000, chain = 2, core = 2, backend = "cmdstanr")
+# compare how many adult males and adult females we see together
+
+### Model pc_bm1 ###
+# Outcome: number of adult females observed
+# Fixed effects: interaction of gridlocation and number of adult males
+# Random effects: camera location
+# Offset: log of deployment length in hours
+
+# hurdle poisson default prior brms
+pc_bm1_prior <- brm(bf(nAF ~ gridtype*nAM + (1|locationfactor) + offset(log(deplengthhours)), hu ~ gridtype*nAM + (1|locationfactor)), prior = brms_default_hp,
+                      data = gridseq_ocf, family = hurdle_poisson(), iter = 2000, chain = 2, core = 2, backend = "cmdstanr", sample_prior = "only")
+
+summary(pc_bm1_prior)
+prior_summary(pc_bm1_prior)
+mcmc_plot(pc_bm1_prior)
+plot(pc_bm1_prior)
+# complete flat prior on the estimates seems excessive
+
+# our prior for hurdle poisson, slightly less flat
+brms_our_hp <- c(prior(normal(0,1), class = Intercept), 
+                 prior(logistic(0,1), class = Intercept, dpar = hu),
+                 prior(normal(0,2.5), lb = 0, class = sd),
+                 prior(normal(0,2.5), lb = 0, class = sd, dpar = hu),
+                 prior(normal(0,1), class = b),
+                 prior(normal(0,1), class = b, dpar = hu)) 
+
+# our prior (with normal (0,1) instead of flat prior. 
+pc_bm1_prior2 <- brm(bf(nAF ~ gridtype*nAM + (1|locationfactor) + offset(log(deplengthhours)), hu ~ gridtype*nAM + (1|locationfactor)), prior = brms_our_hp,
+                    data = gridseq_ocf, family = hurdle_poisson(), iter = 2000, chain = 2, core = 2, backend = "cmdstanr", sample_prior = "only")
+
+summary(pc_bm1_prior2)
+prior_summary(pc_bm1_prior2)
+mcmc_plot(pc_bm1_prior2)
+plot(pc_bm1_prior2)
+
+# use our prior
+pc_bm1 <- brm(bf(nAF ~ gridtype*nAM + (1|locationfactor) + offset(log(deplengthhours)), 
+                 hu ~ gridtype*nAM + (1|locationfactor)), prior = brms_our_hp,
+              data = gridseq_ocf, family = hurdle_poisson(), iter = 3000, chain = 3, 
+              core = 3, backend = "cmdstanr", save_pars = save_pars(all = TRUE), seed = 1234567 )
+# pc_bm1 <- add_criterion(pc_bm1, c("loo", "loo_R2", "bayes_R2"), reloo = TRUE, backend = "cmdstanr", ndraws = 3000) 
+
 #saveRDS(pc_bm1, "gridanalyses/RDS/pc_bm1.rds")
 #pc_bm1 <- readRDS("gridanalyses/RDS/pc_bm1.rds")
+
+# Diagnostics
 summary(pc_bm1)
-plot(conditional_effects(pc_bm1))
 pp_check(pc_bm1)
+plot(pc_bm1)
+
+loo(pc_bm1) 
+round(bayes_R2(pc_bm1),2) # 0.04
+
+# Interpretation
+tidy(pc_bm1)
+# probability of a 0 (no adult females)) in NTU
+hurdle_intercept <- tidy(pc_bm1) |> 
+  filter(term == "hu_(Intercept)") |> 
+  pull(estimate)
+plogis(hurdle_intercept)
+# probability of a 0 (no adult females) in TU
+hurdle_TU <- tidy(pc_bm1) |>
+  filter(term == "hu_gridtypeTU") |>
+  pull(estimate)
+(plogis(hurdle_intercept + hurdle_TU) - plogis(hurdle_intercept)) * 100
+# tool using group increases probability of 0 females by 7.94 percentage points, on average
+
+# conditional effects of 0/not 0 
+plot(conditional_effects(pc_bm1, dpar = "hu"))
+plot(conditional_effects(pc_bm1, dpar = "mu"))
+plot(conditional_effects(pc_bm1))
+# okay so see here clearly that at TU we are more likely to see no adult females, and at NTU we see more adult females together
+# and all together also more likely to see adult females at NTU
+
+# using emmeans to extract estimates on real scale
+# only non-zero mu part
+emmeans(pc_bm1, "gridtype", dpar = "hu", regrid = "response")
+emmeans(pc_bm1, "gridtype", dpar = "mu", regrid = "response")
+emmeans(pc_bm1, "nAM", regrid = "response")
+
 hypothesis(pc_bm1, "Intercept > Intercept + gridtypeTU")
+hypothesis(pc_bm1, "hu_Intercept + hu_gridtypeTU > hu_Intercept")
 
 # significantly higher number of females per sequence in NTU than TU grid
 
-#males
-pc_bm2 <- brm(nAM ~ gridtype + offset(log(deplengthhours)) + (1|locationfactor), data = gridseq_ocf, family = zero_inflated_poisson(link = "log", link_zi = "logit"), iter = 2000, chain = 2, core = 2, backend = "cmdstanr")
+### Model pc_bm2 ###
+# Outcome: number of adult males observed
+# Fixed effects: interaction of gridlocation and number of adult females
+# Random effects: camera location
+# Offset: log of deployment length in hours
+pc_bm2 <- brm(bf(nAM ~ gridtype*nAF + (1|locationfactor) + offset(log(deplengthhours)), 
+                 hu ~ gridtype*nAF + (1|locationfactor)), prior = brms_our_hp,
+              data = gridseq_ocf, family = hurdle_poisson(), iter = 3000, chain = 3, 
+              core = 3, backend = "cmdstanr", save_pars = save_pars(all = TRUE), seed = 1234567 )
+# pc_bm2 <- add_criterion(pc_bm2, c("loo", "loo_R2", "bayes_R2"), reloo = TRUE, backend = "cmdstanr", ndraws = 3000) 
+
 #saveRDS(pc_bm2, "gridanalyses/RDS/pc_bm2.rds")
 #pc_bm2 <- readRDS("gridanalyses/RDS/pc_bm2.rds")
 plot(conditional_effects(pc_bm2))
+plot(conditional_effects(pc_bm2, dpar = "hu"))
+plot(conditional_effects(pc_bm2, dpar = "mu"))
+
 pp_check(pc_bm2)
 
 # also higher number of males per sequence in NTU than TU grid
 
 #combining?
-pc_bm3 <- brm(nAF ~ gridtype*nAM + offset(log(deplengthhours)) + (1|locationfactor), data = gridseq_ocf, family = zero_inflated_poisson(link = "log", link_zi = "logit"), iter = 2000, chain = 2, core = 2, backend = "cmdstanr")
+# brms default for zero inflated poisson
+brms_default_zip <- c(prior(student_t(3, -2.3, 2.5), class = Intercept),
+                   prior(student_t(3, 0, 2.5), class = sd),
+                   prior(normal(0, 99999), class = b)) #flat prior
+
+# our prior for zero inflated poisson
+brms_our_zip <- c(prior(normal(0,1), class = b),
+                   prior(exponential(1), class = sd))
+
+
+pc_bm3 <- brm(nAF ~ gridtype*nAM + offset(log(deplengthhours)) + (1|locationfactor), data = gridseq_ocf, prior = brms_our_zip,
+              family = zero_inflated_poisson(link = "log", link_zi = "logit"), iter = 2000, chain = 2, core = 2, backend = "cmdstanr")
 #saveRDS(pc_bm3, "gridanalyses/RDS/pc_bm3.rds")
 #pc_bm3 <- readRDS("gridanalyses/RDS/pc_bm3.rds")
 plot(conditional_effects(pc_bm3))
@@ -394,6 +641,16 @@ partycomp <- plot(conditional_effects(pc_bm3), plot = FALSE)[[3]]
 pcompplot <- gridseq_ocf %>% 
   group_by(nAM, gridtype) %>%
   summarize_at(vars("nAF"), list(mean = mean, sd = sd, nsample = length))
+
+ftable(gridseq_ocf$nAM, gridseq_ocf$nAF, gridseq_ocf$gridtype)
+
+ggplot(gridseq_ocf, aes(x = nAM, y = nAF, group = nAM)) + geom_raster(alpha = 0.5) + facet_wrap(~gridtype)
+ggplot() +  scale_color_manual(values = c("#81A956", "#C8800F")) + scale_fill_manual(values = c("#81A956", "#C8800F")) +
+  geom_point(data = pcompplot, aes(x = nAM, y = mean, color = gridtype, group = gridtype, alpha = nsample), size = 3, inherit.aes = FALSE) + 
+  scale_alpha_continuous(range = c(0.3,1)) +
+  labs(x = "Number of adult males", y = "Number of adult females") +  theme_bw() + 
+  theme(strip.text.x = element_text(size = 16), axis.title = element_text(size = 16), legend.text =  element_text(size = 14), legend.title = element_text(size =14),
+        axis.text = element_text(size = 12)) 
 
 pcompplot$se <- pcompplot$sd/sqrt(pcompplot$nsample)
 
