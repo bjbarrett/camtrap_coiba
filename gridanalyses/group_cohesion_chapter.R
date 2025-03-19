@@ -1174,14 +1174,14 @@ TUdistmat
 gridseq_ocTU$cooccurrence <- 0
 gridseq_ocTU$cooc_ID <- NA
 
-cooccurrences_TU_TU <- data.frame(cooc_ID = "seqid", seqstart = NA, seqday = NA, cam1 = NA, cam2 = NA, cam3 =NA, distcam12 = 0, distcam13 = 0, nrseq = 0, nrcap_1 = 0, nrcap_2 = 0, nrcap_3 = 0,
+cooccurrences_TU <- data.frame(cooc_ID = "seqid", seqstart = NA, seqday = NA, cam1 = NA, cam2 = NA, cam3 =NA, distcam12 = 0, distcam13 = 0, nrseq = 0, nrcap_1 = 0, nrcap_2 = 0, nrcap_3 = 0,
                                   nAdult_1 = 0, nAdult_2 = 0, nAdult_3 = 0, nSubadult_1 = 0, nSubadult_2 = 0, nSubadult_3 = 0, nJuvenile_1 = 0, nJuvenile_2 = 0,
                                   nJuvenile_3 = 0, nUU_1 = 0, nUU_2 = 0, nUU_3 = 0, tooluse_1 = NA, tooluse_2 = NA, tooluse_3 = NA)
 
 for (i in 1:nrow(gridseq_ocTU)) {
   ## at beginning have some kind of check if the sequenceID is already in the co-occurence dataframe, if so can skip everything
   if(sum(str_detect(cooccurrences_TU$cooc_ID, paste(gridseq_ocTU$sequenceID[i]))) == 0) {
-    dist <- as.data.frame(subset(TUdistmat_all, rownames(TUdistmat_all) %in% gridseq_ocTU$locationfactor[i])) 
+    dist <- as.data.frame(subset(TUdistmat, rownames(TUdistmat) %in% gridseq_ocTU$locationfactor[i])) 
     cand_locs <- colnames(dist[,dist > 150]) # make list of candidate locations for co-occurrence (>150 m away)
     # filter to sequence that are at candidate location and on same day as sequence we're looking at 
     cand_seq <- gridseq_ocTU[gridseq_ocTU$locationfactor %in% cand_locs & gridseq_ocTU$seqday == gridseq_ocTU$seqday[i], c("sequenceID", "locationfactor", "seqday", "seq_start", "seq_end", "n", "nAdult", "nJuvenile","nSubadult", "nUU", "tooluse")]
@@ -1237,7 +1237,7 @@ cooccurrences_NTU <- data.frame(cooc_ID = "seqid", seqstart = NA, seqday = NA, c
 for (i in 1:nrow(gridseq_ocNTU)) {
   ## at beginning have some kind of check if the sequenceID is already in the co-occurence dataframe, if so can skip everything
   if(sum(str_detect(cooccurrences_NTU$cooc_ID, paste(gridseq_ocNTU$sequenceID[i]))) == 0) {
-    dist <- as.data.frame(subset(TUdistmat_all, rownames(TUdistmat_all) %in% gridseq_ocNTU$locationfactor[i])) 
+    dist <- as.data.frame(subset(NTUdistmat, rownames(NTUdistmat) %in% gridseq_ocNTU$locationfactor[i])) 
     cand_locs <- colnames(dist[,dist > 150]) # make list of candidate locations for co-occurrence (>150 m away)
     # filter to sequence that are at candidate location and on same day as sequence we're looking at 
     cand_seq <- gridseq_ocNTU[gridseq_ocNTU$locationfactor %in% cand_locs & gridseq_ocNTU$seqday == gridseq_ocNTU$seqday[i], c("sequenceID", "locationfactor", "seqday", "seq_start", "seq_end", "n", "nAdult", "nJuvenile","nSubadult", "nUU", "tooluse")]
