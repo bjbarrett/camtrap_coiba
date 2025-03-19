@@ -28,7 +28,7 @@ library(broom.mixed)
 library(mapview)
 library(sf)
 library(fitdistrplus)
-
+library(ggeffects)
 
 # STILL DO
 # PRIOR SIMULATIONS AND SET MY PRIORS
@@ -506,7 +506,7 @@ hypothesis(ps_bm1b, "Intercept  > Intercept + gridtypeTU", alpha = 0.05)
 
 ##### PARTY COMPOSITION ####
 
-###### 1: Adult males and adult females ####
+###### 1: Adult females ####
 
 # compare how many adult males and adult females we see together
 
@@ -516,9 +516,16 @@ hypothesis(ps_bm1b, "Intercept  > Intercept + gridtypeTU", alpha = 0.05)
 # Random effects: camera location
 # Offset: log of deployment length in hours
 
-# hurdle poisson default prior brms
-pc_bm1_prior <- brm(bf(nAF ~ gridtype*nAM + (1|locationfactor) + offset(log(deplengthhours)), hu ~ gridtype*nAM + (1|locationfactor)), prior = brms_default_hp,
-                      data = gridseq_ocf, family = hurdle_poisson(), iter = 2000, chain = 2, core = 2, backend = "cmdstanr", sample_prior = "only")
+# brms default for zero inflated poisson
+brms_default_zip <- c(prior(student_t(3, -2.3, 2.5), class = Intercept),
+                      prior(student_t(3, 0, 2.5), class = sd),
+                      prior(normal(0, 99999), class = b)) #flat prior
+
+# zero-inflated poisson default prior brms
+pc_bm1_prior <- brm(nAF ~ gridtype*nAM + (1|locationfactor) + offset(log(deplengthhours)), 
+                    prior = brms_default_zip,data = gridseq_ocf, iter = 2000, chain = 2, core = 2,
+                    family =  zero_inflated_poisson,  
+                    backend = "cmdstanr", sample_prior = "only")
 
 summary(pc_bm1_prior)
 prior_summary(pc_bm1_prior)
@@ -526,17 +533,16 @@ mcmc_plot(pc_bm1_prior)
 plot(pc_bm1_prior)
 # complete flat prior on the estimates seems excessive
 
-# our prior for hurdle poisson, slightly less flat
-brms_our_hp <- c(prior(normal(0,1), class = Intercept), 
-                 prior(logistic(0,1), class = Intercept, dpar = hu),
-                 prior(normal(0,2.5), lb = 0, class = sd),
-                 prior(normal(0,2.5), lb = 0, class = sd, dpar = hu),
-                 prior(normal(0,1), class = b),
-                 prior(normal(0,1), class = b, dpar = hu)) 
+# our prior for zero inflated poisson
+brms_our_zip <- c(prior(normal(0,1), class = b),
+                  prior(normal(0,1), class = Intercept),
+                  prior(exponential(1), class = sd))
 
 # our prior (with normal (0,1) instead of flat prior. 
-pc_bm1_prior2 <- brm(bf(nAF ~ gridtype*nAM + (1|locationfactor) + offset(log(deplengthhours)), hu ~ gridtype*nAM + (1|locationfactor)), prior = brms_our_hp,
-                    data = gridseq_ocf, family = hurdle_poisson(), iter = 2000, chain = 2, core = 2, backend = "cmdstanr", sample_prior = "only")
+pc_bm1_prior2 <- brm(nAF ~ gridtype*nAM + (1|locationfactor) + offset(log(deplengthhours)), 
+                     prior = brms_our_zip,data = gridseq_ocf, iter = 2000, chain = 2, core = 2,
+                     family =  zero_inflated_poisson,  
+                     backend = "cmdstanr", sample_prior = "only")
 
 summary(pc_bm1_prior2)
 prior_summary(pc_bm1_prior2)
@@ -544,11 +550,11 @@ mcmc_plot(pc_bm1_prior2)
 plot(pc_bm1_prior2)
 
 # use our prior
-pc_bm1 <- brm(bf(nAF ~ gridtype*nAM + (1|locationfactor) + offset(log(deplengthhours)), 
-                 hu ~ gridtype*nAM + (1|locationfactor)), prior = brms_our_hp,
-              data = gridseq_ocf, family = hurdle_poisson(), iter = 3000, chain = 3, 
-              core = 3, backend = "cmdstanr", save_pars = save_pars(all = TRUE), seed = 1234567 )
-# pc_bm1 <- add_criterion(pc_bm1, c("loo", "loo_R2", "bayes_R2"), reloo = TRUE, backend = "cmdstanr", ndraws = 3000) 
+pc_bm1 <- brm(nAF ~ gridtype + gridtype*nAM + (1|locationfactor) + offset(log(deplengthhours)), 
+              prior = brms_our_zip, data = gridseq_ocf, family = zero_inflated_poisson, 
+              iter = 3000, chain = 3, core = 3, backend = "cmdstanr", 
+              save_pars = save_pars(all = TRUE), seed = 1234567 )
+#pc_bm1 <- add_criterion(pc_bm1, c("loo", "loo_R2", "bayes_R2"), reloo = TRUE, backend = "cmdstanr", ndraws = 3000) 
 
 #saveRDS(pc_bm1, "gridanalyses/RDS/pc_bm1.rds")
 #pc_bm1 <- readRDS("gridanalyses/RDS/pc_bm1.rds")
@@ -557,114 +563,27 @@ pc_bm1 <- brm(bf(nAF ~ gridtype*nAM + (1|locationfactor) + offset(log(deplengthh
 summary(pc_bm1)
 pp_check(pc_bm1)
 plot(pc_bm1)
+plot(conditional_effects(pc_bm1))
 
 loo(pc_bm1) 
-round(bayes_R2(pc_bm1),2) # 0.04
+round(bayes_R2(pc_bm1),2) # 0.05
 
 # Interpretation
-tidy(pc_bm1)
-# probability of a 0 (no adult females)) in NTU
-hurdle_intercept <- tidy(pc_bm1) |> 
-  filter(term == "hu_(Intercept)") |> 
-  pull(estimate)
-plogis(hurdle_intercept)
-# probability of a 0 (no adult females) in TU
-hurdle_TU <- tidy(pc_bm1) |>
-  filter(term == "hu_gridtypeTU") |>
-  pull(estimate)
-(plogis(hurdle_intercept + hurdle_TU) - plogis(hurdle_intercept)) * 100
-# tool using group increases probability of 0 females by 7.94 percentage points, on average
-
-# conditional effects of 0/not 0 
-plot(conditional_effects(pc_bm1, dpar = "hu"))
-plot(conditional_effects(pc_bm1, dpar = "mu"))
-plot(conditional_effects(pc_bm1))
-# okay so see here clearly that at TU we are more likely to see no adult females, and at NTU we see more adult females together
-# and all together also more likely to see adult females at NTU
-
-# using emmeans to extract estimates on real scale
-# only non-zero mu part
-emmeans(pc_bm1, "gridtype", dpar = "hu", regrid = "response")
-emmeans(pc_bm1, "gridtype", dpar = "mu", regrid = "response")
-emmeans(pc_bm1, "nAM", regrid = "response")
-
+emmeans(pc_bm1, "gridtype", regrid = "response")
+emmeans(pc_bm1, "nAM", by = "gridtype", regrid = "response")
 hypothesis(pc_bm1, "Intercept > Intercept + gridtypeTU")
-hypothesis(pc_bm1, "hu_Intercept + hu_gridtypeTU > hu_Intercept")
 
-# significantly higher number of females per sequence in NTU than TU grid
-
-### Model pc_bm2 ###
-# Outcome: number of adult males observed
-# Fixed effects: interaction of gridlocation and number of adult females
-# Random effects: camera location
-# Offset: log of deployment length in hours
-pc_bm2 <- brm(bf(nAM ~ gridtype*nAF + (1|locationfactor) + offset(log(deplengthhours)), 
-                 hu ~ gridtype*nAF + (1|locationfactor)), prior = brms_our_hp,
-              data = gridseq_ocf, family = hurdle_poisson(), iter = 3000, chain = 3, 
-              core = 3, backend = "cmdstanr", save_pars = save_pars(all = TRUE), seed = 1234567 )
-# pc_bm2 <- add_criterion(pc_bm2, c("loo", "loo_R2", "bayes_R2"), reloo = TRUE, backend = "cmdstanr", ndraws = 3000) 
-
-#saveRDS(pc_bm2, "gridanalyses/RDS/pc_bm2.rds")
-#pc_bm2 <- readRDS("gridanalyses/RDS/pc_bm2.rds")
-plot(conditional_effects(pc_bm2))
-plot(conditional_effects(pc_bm2, dpar = "hu"))
-plot(conditional_effects(pc_bm2, dpar = "mu"))
-
-pp_check(pc_bm2)
-
-# also higher number of males per sequence in NTU than TU grid
-
-#combining?
-# brms default for zero inflated poisson
-brms_default_zip <- c(prior(student_t(3, -2.3, 2.5), class = Intercept),
-                   prior(student_t(3, 0, 2.5), class = sd),
-                   prior(normal(0, 99999), class = b)) #flat prior
-
-# our prior for zero inflated poisson
-brms_our_zip <- c(prior(normal(0,1), class = b),
-                   prior(exponential(1), class = sd))
-
-
-pc_bm3 <- brm(nAF ~ gridtype*nAM + offset(log(deplengthhours)) + (1|locationfactor), data = gridseq_ocf, prior = brms_our_zip,
-              family = zero_inflated_poisson(link = "log", link_zi = "logit"), iter = 2000, chain = 2, core = 2, backend = "cmdstanr")
-#saveRDS(pc_bm3, "gridanalyses/RDS/pc_bm3.rds")
-#pc_bm3 <- readRDS("gridanalyses/RDS/pc_bm3.rds")
-plot(conditional_effects(pc_bm3))
-pp_check(pc_bm3)
-mcmc_plot(pc_bm3)
-summary(pc_bm3)
-hypothesis(pc_bm3, "Intercept > Intercept + gridtypeTU")
-
-# plot with real data plotted over it
-partycomp <- plot(conditional_effects(pc_bm3), plot = FALSE)[[3]]
+# plot of relationship males and females with real data plotted over it
+partycomp <- plot(conditional_effects(pc_bm1), plot = FALSE)[[3]]
 
 pcompplot <- gridseq_ocf %>% 
   group_by(nAM, gridtype) %>%
   summarize_at(vars("nAF"), list(mean = mean, sd = sd, nsample = length))
 
-ftable(gridseq_ocf$nAM, gridseq_ocf$nAF, gridseq_ocf$gridtype)
-
-ggplot(gridseq_ocf, aes(x = nAM, y = nAF, group = nAM)) + geom_raster(alpha = 0.5) + facet_wrap(~gridtype)
-ggplot() +  scale_color_manual(values = c("#81A956", "#C8800F")) + scale_fill_manual(values = c("#81A956", "#C8800F")) +
-  geom_point(data = pcompplot, aes(x = nAM, y = mean, color = gridtype, group = gridtype, alpha = nsample), size = 3, inherit.aes = FALSE) + 
-  scale_alpha_continuous(range = c(0.3,1)) +
-  labs(x = "Number of adult males", y = "Number of adult females") +  theme_bw() + 
-  theme(strip.text.x = element_text(size = 16), axis.title = element_text(size = 16), legend.text =  element_text(size = 14), legend.title = element_text(size =14),
-        axis.text = element_text(size = 12)) 
-
 pcompplot$se <- pcompplot$sd/sqrt(pcompplot$nsample)
 
-# with real means on
-ggplot() +  scale_color_manual(values = c("#81A956", "#C8800F")) + scale_fill_manual(values = c("#81A956", "#C8800F")) +
-  geom_point(data = pcompplot, aes(x = nAM, y = mean, color = gridtype, group = gridtype, alpha = nsample), size = 3, inherit.aes = FALSE) + 
-  scale_alpha_continuous(range = c(0.3,1)) +
-  geom_line(data = partycomp$data, aes(x = nAM, y = estimate__, color = gridtype, group = gridtype), size = 1.5) +
-  geom_ribbon(data = partycomp$data, aes(x = nAM, ymin = lower__, ymax = upper__, group = gridtype, fill = gridtype), alpha = 0.2) +
-  labs(x = "Number of adult males", y = "Number of adult females") +  theme_bw() + 
-  theme(strip.text.x = element_text(size = 16), axis.title = element_text(size = 16), legend.text =  element_text(size = 14), legend.title = element_text(size =14),
-        axis.text = element_text(size = 12)) 
-
 # with means and error bars
+#png("gridanalyses/RDS/partycomp_plot.png", width = 8, height = 7, units = 'in', res = 300)
 ggplot() +  scale_color_manual(values = c("#81A956", "#C8800F")) + scale_fill_manual(values = c("#81A956", "#C8800F")) +
   geom_point(data = pcompplot, aes(x = nAM, y = mean, color = gridtype),  size = 3, inherit.aes = FALSE, alpha = 0.5) +  
   geom_errorbar(data = pcompplot, aes(x = nAM, ymin = mean - se, 
@@ -675,14 +594,38 @@ ggplot() +  scale_color_manual(values = c("#81A956", "#C8800F")) + scale_fill_ma
   labs(x = "Number of adult males", y = "Number of adult females") +  theme_bw() + 
   theme(strip.text.x = element_text(size = 16), axis.title = element_text(size = 16), legend.text =  element_text(size = 14), legend.title = element_text(size =14),
         axis.text = element_text(size = 12)) 
+#dev.off()
 
-###### 2: Adults and juveniles ####
-pc_bm4 <- brm(nJuvenile ~ gridtype*nAdults + offset(log(deplengthhours)) + (1|locationfactor), data = gridseq_ocf, family = zero_inflated_poisson(link = "log", link_zi = "logit"), iter = 2000, chain = 2, core = 2, backend = "cmdstanr")
+###### 2: Adult males ####
 
+### Model pc_bm2 ###
+# Outcome: number of adult males observed
+# Fixed effects: interaction of gridlocation and number of adult females
+# Random effects: camera location
+# Offset: log of deployment length in hours
+pc_bm2 <- brm(nAM ~ gridtype + gridtype*nAF + (1|locationfactor) + offset(log(deplengthhours)), 
+              prior = brms_our_zip, data = gridseq_ocf, family = zero_inflated_poisson, 
+              iter = 3000, chain = 3, core = 3, backend = "cmdstanr", 
+              save_pars = save_pars(all = TRUE), seed = 1234567 )
+# pc_bm2 <- add_criterion(pc_bm2, c("loo", "loo_R2", "bayes_R2"), reloo = TRUE, backend = "cmdstanr", ndraws = 3000) 
 
-###### SPATIAL COHESION #####
+#saveRDS(pc_bm2, "gridanalyses/RDS/pc_bm2.rds")
+#pc_bm2 <- readRDS("gridanalyses/RDS/pc_bm2.rds")
+# Diagnostics
+summary(pc_bm2)
+pp_check(pc_bm2)
+plot(pc_bm2)
+plot(conditional_effects(pc_bm2))
 
-##### CO-OCCURRENCES ####
+loo(pc_bm2) 
+round(bayes_R2(pc_bm2),2) # 0.05
+
+# Interpretation
+emmeans(pc_bm2, "gridtype", regrid = "response")
+emmeans(pc_bm2, "nAF", by = "gridtype", regrid = "response")
+hypothesis(pc_bm2, "Intercept > Intercept + gridtypeTU")
+
+### SPATIAL COHESION #####
 
 ## Step 1: Generate distance matrix showing distance between each camera per grid
 TUdistmat <- geodist::geodist(TUgridcams)
@@ -695,372 +638,19 @@ rownames(NTUdistmat) <- NTUgridcams$locationfactor
 colnames(NTUdistmat) <- NTUgridcams$locationfactor
 NTUdistmat
 
-### Using all TU data (not just grid), looking for co-occurrences within 60 seconds >150 m away
-# exclude sequences with unfamiliar individuals (from grid) and CEBUS-03 (duplicate)
-agoutiseq_jt <- agoutisequence_c[agoutisequence_c$capuchin == 1 & agoutisequence_c$island == "Jicaron" & agoutisequence_c$tool_site == 1 & !agoutisequence_c$locationfactor == "CEBUS-03",]
-unfamiliars <- agouticlean$sequenceID[which(str_detect(agouticlean$observationComments, "unfamiliar") == TRUE & agouticlean$tool_site == 1 & agouticlean$island == "Jicaron")]
-agoutiseq_jt <- agoutiseq_jt[! agoutiseq_jt$sequenceID %in% unfamiliars,]
-
-# make distance matrix for all cameras
-TUcams <- agoutiseq_jt[!duplicated(agoutiseq_jt$locationfactor), c("locationfactor", "latitude", "longitude")]
-TUcams <- TUcams[order(TUcams$locationfactor),]
-TUdistmat_all <- geodist::geodist(TUcams)
-rownames(TUdistmat_all) <- TUcams$locationfactor
-colnames(TUdistmat_all) <- TUcams$locationfactor
-
-# make blank co-occurrence info data frame? 
-agoutiseq_jt$cooccurrence <- 0
-agoutiseq_jt$cooc_ID <- NA
-
-cooccurrences <- data.frame(cooc_ID = "seqid", seqstart = NA, seqday = NA, cam1 = NA, cam2 = NA, cam3 =NA, distcam12 = 0, distcam13 = 0, nrseq = 0, nrcap_1 = 0, nrcap_2 = 0, nrcap_3 = 0,
-                            nAdult_1 = 0, nAdult_2 = 0, nAdult_3 = 0, nSubadult_1 = 0, nSubadult_2 = 0, nSubadult_3 = 0, nJuvenile_1 = 0, nJuvenile_2 = 0,
-                            nJuvenile_3 = 0, nUU_1 = 0, nUU_2 = 0, nUU_3 = 0, tooluse_1 = NA, tooluse_2 = NA, tooluse_3 = NA)
-
-## taking 150 m < 60 seconds
-for (i in 1:nrow(agoutiseq_jt)) {
-  ## at beginning have some kind of check if the sequenceID is already in the co-occurence dataframe, if so can skip everything
-  if(sum(str_detect(cooccurrences$cooc_ID, paste(agoutiseq_jt$sequenceID[i]))) == 0) {
-    dist <- as.data.frame(subset(TUdistmat_all, rownames(TUdistmat_all) %in% agoutiseq_jt$locationfactor[i])) 
-    cand_locs <- colnames(dist[,dist > 150]) # make list of candidate locations for co-occurrence (>150 m away)
-    # filter to sequence that are at candidate location and on same day as sequence we're looking at 
-    cand_seq <- agoutiseq_jt[agoutiseq_jt$locationfactor %in% cand_locs & agoutiseq_jt$seqday == agoutiseq_jt$seqday[i], c("sequenceID", "locationfactor", "seqday", "seq_start", "seq_end", "n", "nAdult", "nJuvenile","nSubadult", "nUU", "tooluse")]
-    dist_m <- melt(dist)
-    cand_seq$locationfactor <- as.character(cand_seq$locationfactor)
-    dist_m$variable <- as.character(dist_m$variable)
-    cand_seq <- left_join(cand_seq, dist_m, by = c("locationfactor" = "variable"))
-    # see if there are any co-occurrences
-    # if there is anything, then extract information from those sequences, both add to agoutiseq_jt dataframe, and to co-occurrence dataframe?
-    if(nrow(cand_seq) > 0) {
-      if(min(abs(difftime(agoutiseq_jt$seq_start[i], cand_seq$seq_start, unit = "s"))) < 60) {
-        cand_seq$dtime <- difftime(agoutiseq_jt$seq_start[i], cand_seq$seq_start, unit = "s")
-        cand_seq_t <- cand_seq[abs(cand_seq$dtime) < 60,]
-        cand_seq_t <- cand_seq_t[!duplicated(cand_seq_t$locationfactor),]
-        if(nrow(cand_seq_t) > 0) {
-          agoutiseq_jt$cooccurrence <- 1
-          agoutiseq_jt$cooc_ID[i] <- ifelse(nrow(cand_seq_t) == 1, paste(agoutiseq_jt$sequenceID[i], cand_seq_t$sequenceID[1], sep = ","),
-                                            paste(agoutiseq_jt$sequenceID[i], cand_seq_t$sequenceID[1], cand_seq_t$sequenceID[2], sep = ","))
-          cooccurrences[nrow(cooccurrences) +1,] <- c(agoutiseq_jt$cooc_ID[i], paste(agoutiseq_jt$seq_start[i]), paste(agoutiseq_jt$seqday[i]), paste(agoutiseq_jt$locationfactor[i]), 
-                                                      paste(cand_seq_t$locationfactor[1]), paste(cand_seq_t$locationfactor[2]), cand_seq_t$value[1], cand_seq_t$value[2], nrow(cand_seq_t), agoutiseq_jt$n[i], 
-                                                      cand_seq_t$n[1], cand_seq_t$n[2], agoutiseq_jt$nAdult[i], cand_seq_t$nAdult[1], cand_seq_t$nAdult[2],agoutiseq_jt$nSubadult[i], cand_seq_t$nSubadult[1], 
-                                                      cand_seq_t$nSubadult[2], agoutiseq_jt$nJuvenile[i], cand_seq_t$nJuvenile[1], cand_seq_t$nJuvenile[2], agoutiseq_jt$nUU[i], cand_seq_t$nUU[1], 
-                                                      cand_seq_t$nUU[2], paste(agoutiseq_jt$tooluse[i]), paste(cand_seq_t$tooluse[1]), paste(cand_seq_t$tooluse[2]))
-        }
-      }
-    }
-  }
-  print(i)
-}
-
-# Using lenient criterion (the further, the more time)
-# make curve for co-occurrences
-# so 150 meters < 60 seconds, but at 300 meters < 120 seconds (or different relationship)
-disttime <- data.frame(distance = seq(150, 1020, by = 10), time = 60)
-str(disttime)
-disttime$time[which(disttime$distance > 150)] <- 60 + ((disttime$distance[which(disttime$distance>150)]-150) * 0.4)
-
-for (i in 1:nrow(agoutiseq_jt)) {
-  ## at beginning have some kind of check if the sequenceID is already in the co-occurence dataframe, if so can skip everything
-  if(sum(str_detect(cooccurrences$cooc_ID, paste(agoutiseq_jt$sequenceID[i]))) == 0) {
-    dist <- as.data.frame(subset(TUdistmat_all, rownames(TUdistmat_all) %in% agoutiseq_jt$locationfactor[i])) 
-    cand_locs <- colnames(dist[,dist > 150]) # make list of candidate locations for co-occurrence (>150 m away)
-    # filter to sequence that are at candidate location and on same day as sequence we're looking at 
-    cand_seq <- agoutiseq_jt[agoutiseq_jt$locationfactor %in% cand_locs & agoutiseq_jt$seqday == agoutiseq_jt$seqday[i], c("sequenceID", "locationfactor", "seqday", "seq_start", "seq_end", "n", "nAdult", "nJuvenile","nSubadult", "nUU", "tooluse")]
-    dist_m <- melt(dist)
-    cand_seq$locationfactor <- as.character(cand_seq$locationfactor)
-    dist_m$variable <- as.character(dist_m$variable)
-    cand_seq <- left_join(cand_seq, dist_m, by = c("locationfactor" = "variable"))
-    # see if there are any co-occurrences
-    # if there is anything, then extract information from those sequences, both add to agoutiseq_jt dataframe, and to co-occurrence dataframe?
-    if(nrow(cand_seq) > 0) {
-      # identify the difftime cutoff for every row
-      cand_seq$cutoff <- disttime$time[findInterval(cand_seq$value, disttime$distance)]
-      cand_seq$flag <- ifelse(abs(difftime(agoutiseq_jt$seq_start[i], cand_seq$seq_start, unit = "s")) < cand_seq$cutoff, 1, 0)
-      if(sum(cand_seq$flag) > 0)  {
-        cand_seq$dtime <- difftime(agoutiseq_jt$seq_start[i], cand_seq$seq_start, unit = "s")
-        cand_seq_t <- cand_seq[cand_seq$flag == 1,]
-        cand_seq_t <- cand_seq_t[!duplicated(cand_seq_t$locationfactor),]
-        if(nrow(cand_seq_t) > 0) {
-          agoutiseq_jt$cooccurrence <- 1
-          agoutiseq_jt$cooc_ID[i] <- ifelse(nrow(cand_seq_t) == 1, paste(agoutiseq_jt$sequenceID[i], cand_seq_t$sequenceID[1], sep = ","),
-                                            paste(agoutiseq_jt$sequenceID[i], cand_seq_t$sequenceID[1], cand_seq_t$sequenceID[2], sep = ","))
-          cooccurrences[nrow(cooccurrences) +1,] <- c(agoutiseq_jt$cooc_ID[i], paste(agoutiseq_jt$seq_start[i]), paste(agoutiseq_jt$seqday[i]), paste(agoutiseq_jt$locationfactor[i]), 
-                                                      paste(cand_seq_t$locationfactor[1]), paste(cand_seq_t$locationfactor[2]), cand_seq_t$value[1], cand_seq_t$value[2], nrow(cand_seq_t), agoutiseq_jt$n[i], 
-                                                      cand_seq_t$n[1], cand_seq_t$n[2], agoutiseq_jt$nAdult[i], cand_seq_t$nAdult[1], cand_seq_t$nAdult[2],agoutiseq_jt$nSubadult[i], cand_seq_t$nSubadult[1], 
-                                                      cand_seq_t$nSubadult[2], agoutiseq_jt$nJuvenile[i], cand_seq_t$nJuvenile[1], cand_seq_t$nJuvenile[2], agoutiseq_jt$nUU[i], cand_seq_t$nUU[1], 
-                                                      cand_seq_t$nUU[2], paste(agoutiseq_jt$tooluse[i]), paste(cand_seq_t$tooluse[1]), paste(cand_seq_t$tooluse[2]))
-        }
-      }
-    }
-  }
-  print(i)
-}
-
-
-cooccurrences <- cooccurrences[-1,]
-cooccurrences[,7:22] <- as.numeric(unlist(cooccurrences[,7:22]))
-
-# > 150 m < 60 seconds criterion
-#saveRDS(cooccurrences, "gridanalyses/RDS/cooccurrences_fixedgps150.RDS")
-#cooccurrences <- readRDS("gridanalyses/RDS/cooccurrences_fixedgps150.RDS")
-
-# flexible criterion depending on distance
-#saveRDS(cooccurrences, "gridanalyses/RDS/cooccurrences_fixedgpscurve.RDS")
-#cooccurrences <- readRDS("gridanalyses/RDS/cooccurrences_fixedgpscurve.RDS")
-
-cooccurrences_old <- readRDS("gridanalyses/RDS/cooccurrences_wronggps150.RDS")
-cooccurrences_new <- readRDS("gridanalyses/RDS/cooccurrences_fixedgps150.RDS")
-missed <- cooccurrences[-which(cooccurrences_new$cooc_ID %in% cooccurrences_old$cooc_ID),]
-# so the reason we lost so many co occurrences when fixing the long/lat is because CEBUS-04 had a totally wrong location, so many cooccurrences where CEBUs-04 with CEBUS-01 or 02 (which are actually next to each other)
-# SO THE NEW CO-OCCURRENCES ARE CORRECT! 
-
-## Analyses
-
-sum(cooccurrences$tooluse_1 == TRUE | cooccurrences$tooluse_2 == TRUE)
-summary(cooccurrences$nrcap_1)
-summary(cooccurrences$nrcap_2)
-allcapnrs <- c(cooccurrences$nrcap_1, cooccurrences$nrcap_2)
-sum(cooccurrences$nrcap_1 == 1 | cooccurrences$nrcap_2 == 1)
-cooccurrences$ratio <- cooccurrences$nrcap_1/(cooccurrences$nrcap_1 + cooccurrences$nrcap_2)
-summary(cooccurrences$ratio)
-
-cooccurrences$tooluse_any <- factor(ifelse(cooccurrences$tooluse_1 == "TRUE" | cooccurrences$tooluse_2 == "TRUE" | cooccurrences$tooluse_3 == "TRUE", "TRUE", "FALSE"))
-
-hist(hour(cooccurrences$seqstart))
-ggplot(data = cooccurrences, aes(x = hour(cooccurrences$seqstart), fill = tooluse_any)) + geom_histogram(bins = 12, col = "black") + facet_wrap(~tooluse_any) + scale_x_continuous(breaks = 6:18) +
-  theme_bw() + labs(fill = "Tool use", x = "Hour", y = "Number of co-occurrences") + theme(axis.title = element_text(size = 16), axis.text = element_text(size = 14), legend.title = element_text(size = 14),
-                                                                                           legend.text = element_text(size = 12))
-
-ggplot(data = cooccurrences, aes(x = hour(cooccurrences$seqstart))) + geom_histogram(bins = 12, col = "black", fill = "#C8800F") + scale_x_continuous(breaks = 6:18) +
-  theme_bw() + labs(fill = "Tool use", x = "Hour", y = "Number of co-occurrences") + theme(axis.title = element_text(size = 16), axis.text = element_text(size = 14), legend.title = element_text(size = 14),
-                                                                                           legend.text = element_text(size = 12))
-
-max(unique(hour(cooccurrences$seqstart)))
-sum(cooccurrences$nJuvenile_1 > 0 | cooccurrences$nJuvenile_2 > 0)
-sum(cooccurrences$nAdult_1 > 0 | cooccurrences$nAdult_2 > 0)
-sum(cooccurrences$nSubadult_1 > 0 | cooccurrences$nSubadult_2 > 0)
-
-ggplot(data = cooccurrences, aes(x = month(cooccurrences$seqstart), fill = as.factor(year(cooccurrences$seqstart)))) + geom_histogram(bins = 12, col = "black")  + theme_bw() + scale_x_continuous(breaks = 0:12) +
-  labs(fill = "Year") + xlab("Month")
-
-# co-occurrences depending on distance
-hist(cooccurrences$distcam12)
-blub2 <- aggregate(cooccurrences$distcam12, by = list(cam1 = cooccurrences$cam1, cam2 = cooccurrences$cam2, distcam = cooccurrences$distcam12), FUN = ftable)
-
-
-summary(cooccurrences$distcam12)
-agoutiseq_jt$year <- year(agoutiseq_jt$seq_start)
-length(unique(agoutiseq_jt$locationfactor[which(agoutiseq_jt$year == "2022")]))
-
-str(cooccurrences)
-
-
-cooccurrences$nrcap_lowest <- cooccurrences$nrcap_1
-cooccurrences$nrcap_lowest[cooccurrences$nrcap_2 <= cooccurrences$nrcap_1] <- cooccurrences$nrcap_2[cooccurrences$nrcap_2 <= cooccurrences$nrcap_1] 
-cooccurrences$nrcap_highest <- cooccurrences$nrcap_2
-cooccurrences$nrcap_highest[cooccurrences$nrcap_2 <= cooccurrences$nrcap_1] <- cooccurrences$nrcap_1[cooccurrences$nrcap_2 <= cooccurrences$nrcap_1]
-
-cooccurrences$tooluseoption_1 <- ifelse(str_detect(cooccurrences$cam1, "CEBUS") == TRUE, TRUE, FALSE)
-cooccurrences$tooluseoption_2 <- ifelse(str_detect(cooccurrences$cam2, "CEBUS") == TRUE, TRUE, FALSE)
-
-cooccurrences$truetooluse_1 <- cooccurrences$tooluse_1
-cooccurrences$truetooluse_1[which(cooccurrences$tooluseoption_1 == FALSE)] <- NA
-cooccurrences$truetooluse_2 <- cooccurrences$tooluse_2
-cooccurrences$truetooluse_2[which(cooccurrences$tooluseoption_2 == FALSE)] <- NA
-
-cooccurrences$tooluse <- ifelse(cooccurrences$truetooluse_1 == TRUE & cooccurrences$truetooluse_2 == TRUE, "both", 
-                                ifelse(cooccurrences$truetooluse_1 == FALSE & cooccurrences$truetooluse_2 == FALSE, "neither", 
-                                       ifelse(cooccurrences$truetooluse_1 == TRUE & cooccurrences$truetooluse_2 == FALSE | cooccurrences$truetooluse_1 == FALSE & cooccurrences$truetooluse_2 == TRUE, "one", NA)))
-
-table(cooccurrences$truetooluse_1, cooccurrences$tooluseoption_1)
-
-library(scales)
-ggplot(data = cooccurrences, aes(x = nrcap_lowest, y = nrcap_highest)) + geom_bin2d(binwidth = c(1,1)) + theme_bw() +
-  stat_bin2d(geom = "text", aes(label = ..count..), binwidth = 1, col = "white") + scale_fill_gradient(limits = c(0, 75), oob = squish) + 
-  theme(axis.text.x = element_text(hjust = -10, size = 14), axis.text.y = element_text(vjust = -1, size = 14), 
-        axis.ticks = element_blank(), legend.position = "none", axis.title = element_text(size = 18)) + labs(x = "Number of capuchins in smallest party", y = "Number of capuchins in largest party")
-
-### co-occurrences only grid
-# widening timeframe, 2 min instead of 1
-disttime2 <- data.frame(distance = seq(150, 1020, by = 10), time = 120)
-str(disttime2)
-disttime2$time[which(disttime2$distance > 150)] <- 120 + ((disttime2$distance[which(disttime2$distance>150)]-150) * 0.8)
-
-## TU 
-gridseq_ocTU <- gridseq_ocf[gridseq_ocf$gridtype == "TU",]
-# distance matrix is already made
-TUdistmat
-
-# make blank co-occurrence info data frame? 
-gridseq_ocTU$cooccurrence <- 0
-gridseq_ocTU$cooc_ID <- NA
-
-cooccurrences_TU_TU <- data.frame(cooc_ID = "seqid", seqstart = NA, seqday = NA, cam1 = NA, cam2 = NA, cam3 =NA, distcam12 = 0, distcam13 = 0, nrseq = 0, nrcap_1 = 0, nrcap_2 = 0, nrcap_3 = 0,
-                                  nAdult_1 = 0, nAdult_2 = 0, nAdult_3 = 0, nSubadult_1 = 0, nSubadult_2 = 0, nSubadult_3 = 0, nJuvenile_1 = 0, nJuvenile_2 = 0,
-                                  nJuvenile_3 = 0, nUU_1 = 0, nUU_2 = 0, nUU_3 = 0, tooluse_1 = NA, tooluse_2 = NA, tooluse_3 = NA)
-
-for (i in 1:nrow(gridseq_ocTU)) {
-  ## at beginning have some kind of check if the sequenceID is already in the co-occurence dataframe, if so can skip everything
-  if(sum(str_detect(cooccurrences_TU$cooc_ID, paste(gridseq_ocTU$sequenceID[i]))) == 0) {
-    dist <- as.data.frame(subset(TUdistmat_all, rownames(TUdistmat_all) %in% gridseq_ocTU$locationfactor[i])) 
-    cand_locs <- colnames(dist[,dist > 150]) # make list of candidate locations for co-occurrence (>150 m away)
-    # filter to sequence that are at candidate location and on same day as sequence we're looking at 
-    cand_seq <- gridseq_ocTU[gridseq_ocTU$locationfactor %in% cand_locs & gridseq_ocTU$seqday == gridseq_ocTU$seqday[i], c("sequenceID", "locationfactor", "seqday", "seq_start", "seq_end", "n", "nAdult", "nJuvenile","nSubadult", "nUU", "tooluse")]
-    dist_m <- melt(dist)
-    cand_seq$locationfactor <- as.character(cand_seq$locationfactor)
-    dist_m$variable <- as.character(dist_m$variable)
-    cand_seq <- left_join(cand_seq, dist_m, by = c("locationfactor" = "variable"))
-    # see if there are any co-occurrences
-    # if there is anything, then extract information from those sequences, both add to gridseq_ocTU dataframe, and to co-occurrence dataframe?
-    if(nrow(cand_seq) > 0) {
-      # identify the difftime cutoff for every row
-      cand_seq$cutoff <- disttime2$time[findInterval(cand_seq$value, disttime2$distance)]
-      cand_seq$flag <- ifelse(abs(difftime(gridseq_ocTU$seq_start[i], cand_seq$seq_start, unit = "s")) < cand_seq$cutoff, 1, 0)
-      if(sum(cand_seq$flag) > 0)  {
-        cand_seq$dtime <- difftime(gridseq_ocTU$seq_start[i], cand_seq$seq_start, unit = "s")
-        cand_seq_t <- cand_seq[cand_seq$flag == 1,]
-        cand_seq_t <- cand_seq_t[!duplicated(cand_seq_t$locationfactor),]
-        if(nrow(cand_seq_t) > 0) {
-          gridseq_ocTU$cooccurrence <- 1
-          gridseq_ocTU$cooc_ID[i] <- ifelse(nrow(cand_seq_t) == 1, paste(gridseq_ocTU$sequenceID[i], cand_seq_t$sequenceID[1], sep = ","),
-                                            paste(gridseq_ocTU$sequenceID[i], cand_seq_t$sequenceID[1], cand_seq_t$sequenceID[2], sep = ","))
-          cooccurrences_TU[nrow(cooccurrences_TU) +1,] <- c(gridseq_ocTU$cooc_ID[i], paste(gridseq_ocTU$seq_start[i]), paste(gridseq_ocTU$seqday[i]), paste(gridseq_ocTU$locationfactor[i]), 
-                                                            paste(cand_seq_t$locationfactor[1]), paste(cand_seq_t$locationfactor[2]), cand_seq_t$value[1], cand_seq_t$value[2], nrow(cand_seq_t), gridseq_ocTU$n[i], 
-                                                            cand_seq_t$n[1], cand_seq_t$n[2], gridseq_ocTU$nAdult[i], cand_seq_t$nAdult[1], cand_seq_t$nAdult[2],gridseq_ocTU$nSubadult[i], cand_seq_t$nSubadult[1], 
-                                                            cand_seq_t$nSubadult[2], gridseq_ocTU$nJuvenile[i], cand_seq_t$nJuvenile[1], cand_seq_t$nJuvenile[2], gridseq_ocTU$nUU[i], cand_seq_t$nUU[1], 
-                                                            cand_seq_t$nUU[2], paste(gridseq_ocTU$tooluse[i]), paste(cand_seq_t$tooluse[1]), paste(cand_seq_t$tooluse[2]))
-        }
-      }
-    }
-  }
-  print(i)
-}
-
-cooccurrences_TU <- cooccurrences_TU[-1,]
-cooccurrences_TU[,7:22] <- as.numeric(unlist(cooccurrences_TU[,7:22]))
-
-hist(cooccurrences_TU$distcam12)
-
-## NTU 
-gridseq_ocNTU <- gridseq_ocf[gridseq_ocf$gridtype == "NTU",]
-
-# distance matrix is already made
-NTUdistmat
-
-# make blank co-occurrence info data frame? 
-gridseq_ocNTU$cooccurrence <- 0
-gridseq_ocNTU$cooc_ID <- NA
-
-cooccurrences_NTU <- data.frame(cooc_ID = "seqid", seqstart = NA, seqday = NA, cam1 = NA, cam2 = NA, cam3 =NA, distcam12 = 0, distcam13 = 0, nrseq = 0, nrcap_1 = 0, nrcap_2 = 0, nrcap_3 = 0,
-                                nAdult_1 = 0, nAdult_2 = 0, nAdult_3 = 0, nSubadult_1 = 0, nSubadult_2 = 0, nSubadult_3 = 0, nJuvenile_1 = 0, nJuvenile_2 = 0,
-                                nJuvenile_3 = 0, nUU_1 = 0, nUU_2 = 0, nUU_3 = 0, tooluse_1 = NA, tooluse_2 = NA, tooluse_3 = NA)
-
-for (i in 1:nrow(gridseq_ocNTU)) {
-  ## at beginning have some kind of check if the sequenceID is already in the co-occurence dataframe, if so can skip everything
-  if(sum(str_detect(cooccurrences_NTU$cooc_ID, paste(gridseq_ocNTU$sequenceID[i]))) == 0) {
-    dist <- as.data.frame(subset(TUdistmat_all, rownames(TUdistmat_all) %in% gridseq_ocNTU$locationfactor[i])) 
-    cand_locs <- colnames(dist[,dist > 150]) # make list of candidate locations for co-occurrence (>150 m away)
-    # filter to sequence that are at candidate location and on same day as sequence we're looking at 
-    cand_seq <- gridseq_ocNTU[gridseq_ocNTU$locationfactor %in% cand_locs & gridseq_ocNTU$seqday == gridseq_ocNTU$seqday[i], c("sequenceID", "locationfactor", "seqday", "seq_start", "seq_end", "n", "nAdult", "nJuvenile","nSubadult", "nUU", "tooluse")]
-    dist_m <- melt(dist)
-    cand_seq$locationfactor <- as.character(cand_seq$locationfactor)
-    dist_m$variable <- as.character(dist_m$variable)
-    cand_seq <- left_join(cand_seq, dist_m, by = c("locationfactor" = "variable"))
-    # see if there are any co-occurrences
-    # if there is anything, then extract information from those sequences, both add to gridseq_ocNTU dataframe, and to co-occurrence dataframe?
-    if(nrow(cand_seq) > 0) {
-      # identify the difftime cutoff for every row
-      cand_seq$cutoff <- disttime2$time[findInterval(cand_seq$value, disttime2$distance)]
-      cand_seq$flag <- ifelse(abs(difftime(gridseq_ocNTU$seq_start[i], cand_seq$seq_start, unit = "s")) < cand_seq$cutoff, 1, 0)
-      if(sum(cand_seq$flag) > 0)  {
-        cand_seq$dtime <- difftime(gridseq_ocNTU$seq_start[i], cand_seq$seq_start, unit = "s")
-        cand_seq_t <- cand_seq[cand_seq$flag == 1,]
-        cand_seq_t <- cand_seq_t[!duplicated(cand_seq_t$locationfactor),]
-        if(nrow(cand_seq_t) > 0) {
-          gridseq_ocNTU$cooccurrence <- 1
-          gridseq_ocNTU$cooc_ID[i] <- ifelse(nrow(cand_seq_t) == 1, paste(gridseq_ocNTU$sequenceID[i], cand_seq_t$sequenceID[1], sep = ","),
-                                             paste(gridseq_ocNTU$sequenceID[i], cand_seq_t$sequenceID[1], cand_seq_t$sequenceID[2], sep = ","))
-          cooccurrences_NTU[nrow(cooccurrences_NTU) +1,] <- c(gridseq_ocNTU$cooc_ID[i], paste(gridseq_ocNTU$seq_start[i]), paste(gridseq_ocNTU$seqday[i]), paste(gridseq_ocNTU$locationfactor[i]), 
-                                                              paste(cand_seq_t$locationfactor[1]), paste(cand_seq_t$locationfactor[2]), cand_seq_t$value[1], cand_seq_t$value[2], nrow(cand_seq_t), gridseq_ocNTU$n[i], 
-                                                              cand_seq_t$n[1], cand_seq_t$n[2], gridseq_ocNTU$nAdult[i], cand_seq_t$nAdult[1], cand_seq_t$nAdult[2],gridseq_ocNTU$nSubadult[i], cand_seq_t$nSubadult[1], 
-                                                              cand_seq_t$nSubadult[2], gridseq_ocNTU$nJuvenile[i], cand_seq_t$nJuvenile[1], cand_seq_t$nJuvenile[2], gridseq_ocNTU$nUU[i], cand_seq_t$nUU[1], 
-                                                              cand_seq_t$nUU[2], paste(gridseq_ocNTU$tooluse[i]), paste(cand_seq_t$tooluse[1]), paste(cand_seq_t$tooluse[2]))
-        }
-      }
-    }
-  }
-  print(i)
-}
-
-cooccurrences_NTU <- cooccurrences_NTU[-1,]
-cooccurrences_NTU[,7:22] <- as.numeric(unlist(cooccurrences_NTU[,7:22]))
-
-hist(cooccurrences_NTU$distcam12)
-
-
-
-######## GAUSSIAN PROCESSES ############
-
-## For Brendan: can start running from here
-# load data in that I send you
-#TUdistmat <- readRDS("gridanalyses/RDS/TUdistmat.rds")
-#NTUdistmat <- readRDS("gridanalyses/RDS/NTUdistmat.rds")
-#gridseq_ocf <- readRDS("gridanalyses/RDS/gridseq_ocf.rds")
+###### Gaussian Processes: TU ####
 
 dTU <- gridseq_ocf[gridseq_ocf$gridtype == "TU",]
 dTU <- droplevels.data.frame(dTU)
+dTU$locationfactor <- as.factor(dTU$locationfactor)
 # index cameras
 dTU$camera <- as.numeric(dTU$locationfactor)
 
 dNTU <- gridseq_ocf[gridseq_ocf$gridtype == "NTU",]
 dNTU <- droplevels.data.frame(dNTU)
+dNTU$locationfactor <- as.factor(dNTU$locationfactor)
 # index cameras
 dNTU$camera <- as.numeric(dNTU$locationfactor)
-
-## visualize the data we have
-
-# TU and NTU separate
-# per month (?)
-# information captured:
-# one row per camera, number of sequences in a day (or a hash per sequence). Color can reflect number of capuchins per sequence. 
-# Could do it on time and show all the times of the sequences within a day (limit to daytime hours?)
-
-# subset to things we need for graph
-dTU_graph <- dTU[,c("seq_startday", "locationfactor", "n", "seq_length", "seq_start", "camera")]
-dNTU_graph <- dNTU[,c("seq_startday", "locationfactor", "n", "seq_length", "seq_start", "camera")]
-
-rbPal <- colorRampPalette(c("blue", "red"))
-colors <- data.frame(n = 1:16, color = rbPal(16))
-
-cameraTU_index <- data.frame(index = sort(unique(dTU_graph$camera)), cameralocation = sort(unique(dTU_graph$locationfactor)))
-cameraNTU_index <- data.frame(index = sort(unique(dNTU_graph$camera)), cameralocation = sort(unique(dNTU_graph$locationfactor)))
-
-#TU group - first half of deployment (until 18th of September 2022)
-par(mar=c(5.1, 4.1, 4.1, 8.1), xpd=TRUE)
-plot(camera ~ seq_start, data = dTU_graph[dTU_graph$seq_start < "2022-09-19",], pch = 21, yaxt = "n",  ylab = NA, xaxs ="i", col = colors$color[n], xlim = c(as.POSIXct("2022-05-12"), as.POSIXct("2022-09-20")))
-axis(2, at=cameraTU_index$index , labels=cameraTU_index$cameralocation, las=2 , cex.axis=1 , tick=TRUE , lwd.ticks=0 , hadj=0.8)
-legend("right",  inset=c(-0.15,0), pch=21, col=colors$color, as.character(colors$n), horiz=FALSE , cex=1 ,  xjust = 0.5, title = "# capuchins" )
-title("Tool-users")
-
-# TU group - second half of deployment (18th of september - end)
-par(mar=c(5.1, 4.1, 4.1, 8.1), xpd=TRUE)
-plot(camera ~ seq_start, data = dTU_graph[dTU_graph$seq_start > "2022-09-18",], pch = 21, yaxt = "n",  ylab = NA, xaxs ="i", col = colors$color[n], xlim = c(as.POSIXct("2022-09-17"), as.POSIXct("2023-01-26")))
-axis(2, at=cameraTU_index$index , labels=cameraTU_index$cameralocation, las=2 , cex.axis=1 , tick=TRUE , lwd.ticks=0 , hadj=0.8)
-legend("right",  inset=c(-0.15,0), pch=21, col=colors$color, as.character(colors$n), horiz=FALSE , cex=1 ,  xjust = 0.5, title = "# capuchins" )
-title("Tool-users")
-
-# NTU group - first half of deployment (until 18th of september)
-par(mar=c(5.1, 4.1, 4.1, 8.1), xpd=TRUE)
-plot(camera ~ seq_start, data = dNTU_graph[dNTU_graph$seq_start < "2022-09-19",], pch = 21, yaxt = "n",  ylab = NA, xaxs ="i", col = colors$color[n], xlim = c(as.POSIXct("2022-05-09"), as.POSIXct("2022-09-20")))
-axis(2, at=cameraNTU_index$index , labels=cameraNTU_index$cameralocation, las=2 , cex.axis=1 , tick=TRUE , lwd.ticks=0 , hadj=0.8)
-legend("right",  inset=c(-0.15,0), pch=21, col=colors$color, as.character(colors$n), horiz=FALSE , cex=1 ,  xjust = 0.5, title = "# capuchins" )
-title("Non-tool-users")
-
-# NTU group - second half of deployment (18th of september - end)
-par(mar=c(5.1, 4.1, 4.1, 8.1), xpd=TRUE)
-plot(camera ~ seq_start, data = dNTU_graph[dNTU_graph$seq_start > "2022-09-18",], pch = 21, yaxt = "n",  ylab = NA, xaxs ="i", col = colors$color[n], xlim = c(as.POSIXct("2022-09-17"), as.POSIXct("2023-01-27")))
-axis(2, at=cameraNTU_index$index , labels=cameraNTU_index$cameralocation, las=2 , cex.axis=1 , tick=TRUE , lwd.ticks=0 , hadj=0.8)
-legend("right",  inset=c(-0.15,0), pch=21, col=colors$color, as.character(colors$n), horiz=FALSE , cex=1 ,  xjust = 0.5, title = "# capuchins" )
-title("Non-tool-users")
 
 # make sure statistical rethinking is installed
 require(rethinking)
@@ -1070,20 +660,17 @@ require(rethinking)
 TUdistmat2 <- round(TUdistmat/100,2)
 NTUdistmat2 <- round(NTUdistmat/100,2)
 
+## Poisson (just count of capuchins no offset of sequence length) ##
 ## work with number of capuchins per sequence (poisson). 
 
-# try removing the zeros
-# try keeping the zeros in
-
-
 ## without 0s
+
 ### Tool-users
 
-
-# island example is collapsed to have one row per island. So we would need one row per camera. 
-# he uses poisson, if we want poisson too we could do total number of capuchins seen (very crude but ok)
+# one row per camera. 
 dTU_total <- aggregate(list(n = dTU$n, seq_length = dTU$seq_length), by = list(camera = dTU$camera, long = dTU$longitude, lat = dTU$latitude,  location = dTU$locationName), FUN = "sum")
 ## add distance to coast per camera
+# REMOVE THIS??
 dist2coast_all <- read.csv("tide_analysis/allcams_gps.csv", header = TRUE)
 dist2coast_all <- dist2coast_all[ , c(2,5)]
 
@@ -1091,13 +678,11 @@ dTU_total <- left_join(dTU_total, dist2coast_all, by = c("location" = "camera_id
 #standardize
 dTU_total$distcoast_z <- as.numeric(scale(dTU_total$distcoast, center = TRUE, scale = TRUE))
 
-# more accurate would be average number of capuchins/rate. So this would be a gamma. Try that too
-# could do average number of capuchins seen? over all sequences?
-## IMPORTANT, HAVE ONE SEQUENCE 01b1e2b3-3a65-4165-a1ed-088f903de735 with a seq_length of 0, because it is only one picture. Not sure how this happened
+## IMPORTANT, HAVE ONE SEQUENCE 01b1e2b3-3a65-4165-a1ed-088f903de735 with a seq_length of 0, because it is only one picture.
 # for now just make it last 1 second
 dTU$seq_length[dTU$seq_length == 0] <- 1
 dTU_meannumber <- aggregate(dTU$n, by = list(camera = dTU$camera, long = dTU$longitude, lat = dTU$latitude, location = dTU$locationName), FUN = "mean")
-# later would probably need to do something like "capuchins per second"
+# for later model with capuchins per second (offset sequence length)
 dTU$rate <- dTU$n/dTU$seq_length
 dTU_meanrate <- aggregate(dTU$rate, by = list(camera = dTU$camera,  long = dTU$longitude, lat = dTU$latitude,  location = dTU$locationName), FUN = "mean")
 
@@ -1224,6 +809,12 @@ post2 <- extract.samples(mTdist_TU2)
 plot(NULL, xlab = "distance (hundred m)", ylab = "covariance",
      xlim = c(0,10), ylim = c(0,3))
 
+# compute posterior mean covariance
+x_seq <- seq(from=0, to = 10, length.out = 100)
+pmcov <- sapply(x_seq, function(x) post2$etasq*exp(-post2$rhosq*x^2))
+pmcov_mu <- apply(pmcov, 2, mean)
+lines(x_seq, pmcov_mu, lwd = 3)
+
 # prior in black
 for(i in 1:n){
   curve(etasq[i]*exp(-rhosq[i]*x^2),
@@ -1305,95 +896,14 @@ dat_list <- list(
   D = TUdistmat2,
   X = dTU_total$distcoast_z)
 
-
-## discuss with Brendan how to incorporate distcoast in the ulam
-# now just added bX and X to lambda but that doesn't seem to be right?
-mTdist_TU3 <- ulam(
-  alist(
-    N ~ dpois(lambda),
-    lambda <- (abar*P^b/g)*exp(a[C]) + bX*X,
-    vector[24]:a ~ multi_normal(0, K),
-    transpars>matrix[24,24]:K <- 
-      cov_GPL2(D, etasq, rhosq, 0.01),
-    c(abar, b,g) ~ dexp(1),
-    bX ~ normal(0, 0.5),
-    etasq ~ dexp(2),
-    rhosq ~ dexp(0.5)
-  ), data = dat_list, chains = 4, cores = 4, iter = 4000)
-
-precis(mTdist_TU3, 3)
-
-# visualize posterior
-post3 <- extract.samples(mTdist_TU3)
-
-# plot posterior median covariance function
-plot(NULL, xlab = "distance (hundred m)", ylab = "covariance",
-     xlim = c(0,10), ylim = c(0,2))
-
-# prior in black
-for(i in 1:n){
-  curve(etasq[i]*exp(-rhosq[i]*x^2),
-        add = TRUE, lwd = 2,
-        col = col.alpha("black",0.5))
-}
-
-## null model in blue
-for (i in 1:50) {
-  curve( post$etasq[i]*exp(-post$rhosq[i]*x^2) , add=TRUE , lwd = 2,
-         col=col.alpha("blue",0.5) )
-}
-
-# population added
-for (i in 1:50) {
-  curve( post2$etasq[i]*exp(-post2$rhosq[i]*x^2) , add=TRUE , lwd = 2,
-         col=col.alpha("red",0.5) )
-}
-
-# population and distcoast
-for (i in 1:50) {
-  curve( post3$etasq[i]*exp(-post3$rhosq[i]*x^2) , add=TRUE , lwd = 2,
-         col=col.alpha("green",0.5) )
-}
-
-# compute posterior median covariance among societies
-K <- matrix(0, nrow = 24, ncol = 24)
-for (i in 1:24)
-  for (j in 1:24)
-    K[i,j] <- median(post3$etasq) *
-  exp( - median(post3$rhosq) * TUdistmat2[i,j]^2)
-diag(K) <- median(post3$etasq) + 0.01
-
-# convert to correlation matrix
-Rho <- round(cov2cor(K), 2)
-# add row/col names for convenience
-colnames(Rho) <- colnames(TUdistmat2)
-rownames(Rho) <- colnames(Rho)
-
-# plot raw data and labels
-plot(dTU_total$long , dTU_total$lat , xlab="longitude" , ylab="latitude" ,
-     col="red"  , pch=16, xlim = c(-81.824, -81.815))
-labels <- as.character(dTU_total$location)
-text( dTU_total$long , dTU_total$lat , labels=labels , cex=0.7 , pos=c(2,4,3,3,4,1,3,2,4,2) )
-# overlay lines shaded by Rho
-for( i in 1:24 )
-  for ( j in 1:24 )
-    if ( i < j )
-      lines( c( dTU_total$long[i],dTU_total$long[j] ) , c( dTU_total$lat[i],dTU_total$lat[j] ) ,
-             lwd=2 , col=col.alpha("black",Rho[i,j]^2) )
-
-# not sure how to measure if distcoast affects covariance?
-
+###### Gaussian Processes: NTU ####
 
 ### Non-tool-users
-
-# island example is collapsed to have one row per island. So we would need one row per camera. 
-# he uses poisson, if we want poisson too we could do total number of capuchins seen (very crude but ok)
 dNTU_total <- aggregate(list(n = dNTU$n, seq_length = dNTU$seq_length), by = list(camera = dNTU$camera, long = dNTU$longitude, lat = dNTU$latitude,  location = dNTU$locationName), FUN = "sum")
 
 dNTU_total <- left_join(dNTU_total, dist2coast_all, by = c("location" = "camera_id"))
 #standardize
 dNTU_total$distcoast_z <- as.numeric(scale(dNTU_total$distcoast, center = TRUE, scale = TRUE))
-
 
 # more accurate would be average number of capuchins/rate. So this would be a gamma. Try that too
 # could do average number of capuchins seen? over all sequences?
@@ -1512,7 +1022,7 @@ plot(NULL, xlab = "distance (hundred m)", ylab = "covariance",
 
 # compute posterior mean covariance
 x_seq <- seq(from=0, to = 10, length.out = 100)
-pmcov <- sapply(x_seq, function(x) post$etasq*exp(-post$rhosq*x^2))
+pmcov <- sapply(x_seq, function(x) post2$etasq*exp(-post2$rhosq*x^2))
 pmcov_mu <- apply(pmcov, 2, mean)
 lines(x_seq, pmcov_mu, lwd = 3)
 
@@ -1567,36 +1077,226 @@ for( i in 1:24 )
 # look at this in more detail later
 
 
-### TRIALS #####
+## incorporate distcoast? THINK WE SHOULD SCRAP
 
-### looking at how many 1 individual sequences we get 
-hist(gridsequence_c$n[gridsequence_c$gridtype == "TU"])
-hist(gridsequence_c$n[gridsequence_c$gridtype == "NTU"])
+## discuss with Brendan how to incorporate distcoast in the ulam
+# now just added bX and X to lambda but that doesn't seem to be right?
+mTdist_TU3 <- ulam(
+  alist(
+    N ~ dpois(lambda),
+    lambda <- (abar*P^b/g)*exp(a[C]) + bX*X,
+    vector[24]:a ~ multi_normal(0, K),
+    transpars>matrix[24,24]:K <- 
+      cov_GPL2(D, etasq, rhosq, 0.01),
+    c(abar, b,g) ~ dexp(1),
+    bX ~ normal(0, 0.5),
+    etasq ~ dexp(2),
+    rhosq ~ dexp(0.5)
+  ), data = dat_list, chains = 4, cores = 4, iter = 4000)
 
-## this is on all data tool site
-# level of observation
-str(agouticlean)
-agouticlean_jt <- agouticlean[agouticlean$island == "Jicaron" & agouticlean$tool_site == 1,]
-v <- as.data.frame(ftable(agouticlean_jt$individualID))
-# IDs where we have many observations
-ids <- as.character(v$Var1[which(v$Freq > 20)])
+precis(mTdist_TU3, 3)
 
-agouticlean_jti <- agouticlean_jt[agouticlean_jt$individualID %in% ids,]
-# number of 1 sequences
-ggplot(data = agouticlean_jti, aes(x = n)) + geom_histogram(stat = "count") + facet_wrap(~name, scales = "free")
+# visualize posterior
+post3 <- extract.samples(mTdist_TU3)
 
-# hist of sequences depending on age-sex
-# filter to age-sex that we have enough data for
-agesex <- as.data.frame(ftable(agouticlean_jt$agesexF)) 
-agouticlean_jtas <- agouticlean_jt[agouticlean_jt$agesexF %in% agesex$Var1[which(agesex$Freq > 50)],]
-ggplot(data = agouticlean_jtas, aes(x = n)) + geom_histogram(stat = "count") + facet_wrap(~agesexF, scales = "free")
+# plot posterior median covariance function
+plot(NULL, xlab = "distance (hundred m)", ylab = "covariance",
+     xlim = c(0,10), ylim = c(0,2))
 
-# only grid data
-ggplot(data = gridclean_c[gridclean_c$gridtype == "TU",], aes(x = n)) + geom_histogram(stat = "count") + facet_wrap(~agesexF, scales = "free")
-ggplot(data = gridclean_c[gridclean_c$gridtype == "NTU",], aes(x = n)) + geom_histogram(stat = "count") + facet_wrap(~agesexF, scales = "free")
+# prior in black
+for(i in 1:n){
+  curve(etasq[i]*exp(-rhosq[i]*x^2),
+        add = TRUE, lwd = 2,
+        col = col.alpha("black",0.5))
+}
 
-# also just out of interest, when we have the ID data, do we see individuals more at specific locations?
-ggplot(data = agouticlean_jti, aes(x = locationName)) + geom_histogram(stat = "count") + facet_wrap(~name)
+## null model in blue
+for (i in 1:50) {
+  curve( post$etasq[i]*exp(-post$rhosq[i]*x^2) , add=TRUE , lwd = 2,
+         col=col.alpha("blue",0.5) )
+}
+
+# population added
+for (i in 1:50) {
+  curve( post2$etasq[i]*exp(-post2$rhosq[i]*x^2) , add=TRUE , lwd = 2,
+         col=col.alpha("red",0.5) )
+}
+
+# population and distcoast
+for (i in 1:50) {
+  curve( post3$etasq[i]*exp(-post3$rhosq[i]*x^2) , add=TRUE , lwd = 2,
+         col=col.alpha("green",0.5) )
+}
+
+# compute posterior median covariance among societies
+K <- matrix(0, nrow = 24, ncol = 24)
+for (i in 1:24)
+  for (j in 1:24)
+    K[i,j] <- median(post3$etasq) *
+  exp( - median(post3$rhosq) * TUdistmat2[i,j]^2)
+diag(K) <- median(post3$etasq) + 0.01
+
+# convert to correlation matrix
+Rho <- round(cov2cor(K), 2)
+# add row/col names for convenience
+colnames(Rho) <- colnames(TUdistmat2)
+rownames(Rho) <- colnames(Rho)
+
+# plot raw data and labels
+plot(dTU_total$long , dTU_total$lat , xlab="longitude" , ylab="latitude" ,
+     col="red"  , pch=16, xlim = c(-81.824, -81.815))
+labels <- as.character(dTU_total$location)
+text( dTU_total$long , dTU_total$lat , labels=labels , cex=0.7 , pos=c(2,4,3,3,4,1,3,2,4,2) )
+# overlay lines shaded by Rho
+for( i in 1:24 )
+  for ( j in 1:24 )
+    if ( i < j )
+      lines( c( dTU_total$long[i],dTU_total$long[j] ) , c( dTU_total$lat[i],dTU_total$lat[j] ) ,
+             lwd=2 , col=col.alpha("black",Rho[i,j]^2) )
+
+# not sure how to measure if distcoast affects covariance?
+
+
+##### CO-OCCURRENCES ####
+
+# Co-occurrences within 2 min at 1050 meters
+# widening timeframe, 2 min instead of 1
+disttime2 <- data.frame(distance = seq(150, 1020, by = 10), time = 120)
+str(disttime2)
+disttime2$time[which(disttime2$distance > 150)] <- 120 + ((disttime2$distance[which(disttime2$distance>150)]-150) * 0.8)
+
+## TU 
+gridseq_ocTU <- gridseq_ocf[gridseq_ocf$gridtype == "TU",]
+# distance matrix is already made
+TUdistmat
+
+# make blank co-occurrence info data frame
+gridseq_ocTU$cooccurrence <- 0
+gridseq_ocTU$cooc_ID <- NA
+
+cooccurrences_TU_TU <- data.frame(cooc_ID = "seqid", seqstart = NA, seqday = NA, cam1 = NA, cam2 = NA, cam3 =NA, distcam12 = 0, distcam13 = 0, nrseq = 0, nrcap_1 = 0, nrcap_2 = 0, nrcap_3 = 0,
+                                  nAdult_1 = 0, nAdult_2 = 0, nAdult_3 = 0, nSubadult_1 = 0, nSubadult_2 = 0, nSubadult_3 = 0, nJuvenile_1 = 0, nJuvenile_2 = 0,
+                                  nJuvenile_3 = 0, nUU_1 = 0, nUU_2 = 0, nUU_3 = 0, tooluse_1 = NA, tooluse_2 = NA, tooluse_3 = NA)
+
+for (i in 1:nrow(gridseq_ocTU)) {
+  ## at beginning have some kind of check if the sequenceID is already in the co-occurence dataframe, if so can skip everything
+  if(sum(str_detect(cooccurrences_TU$cooc_ID, paste(gridseq_ocTU$sequenceID[i]))) == 0) {
+    dist <- as.data.frame(subset(TUdistmat_all, rownames(TUdistmat_all) %in% gridseq_ocTU$locationfactor[i])) 
+    cand_locs <- colnames(dist[,dist > 150]) # make list of candidate locations for co-occurrence (>150 m away)
+    # filter to sequence that are at candidate location and on same day as sequence we're looking at 
+    cand_seq <- gridseq_ocTU[gridseq_ocTU$locationfactor %in% cand_locs & gridseq_ocTU$seqday == gridseq_ocTU$seqday[i], c("sequenceID", "locationfactor", "seqday", "seq_start", "seq_end", "n", "nAdult", "nJuvenile","nSubadult", "nUU", "tooluse")]
+    dist_m <- melt(dist)
+    cand_seq$locationfactor <- as.character(cand_seq$locationfactor)
+    dist_m$variable <- as.character(dist_m$variable)
+    cand_seq <- left_join(cand_seq, dist_m, by = c("locationfactor" = "variable"))
+    # see if there are any co-occurrences
+    # if there is anything, then extract information from those sequences, both add to gridseq_ocTU dataframe, and to co-occurrence dataframe?
+    if(nrow(cand_seq) > 0) {
+      # identify the difftime cutoff for every row
+      cand_seq$cutoff <- disttime2$time[findInterval(cand_seq$value, disttime2$distance)]
+      cand_seq$flag <- ifelse(abs(difftime(gridseq_ocTU$seq_start[i], cand_seq$seq_start, unit = "s")) < cand_seq$cutoff, 1, 0)
+      if(sum(cand_seq$flag) > 0)  {
+        cand_seq$dtime <- difftime(gridseq_ocTU$seq_start[i], cand_seq$seq_start, unit = "s")
+        cand_seq_t <- cand_seq[cand_seq$flag == 1,]
+        cand_seq_t <- cand_seq_t[!duplicated(cand_seq_t$locationfactor),]
+        if(nrow(cand_seq_t) > 0) {
+          gridseq_ocTU$cooccurrence <- 1
+          gridseq_ocTU$cooc_ID[i] <- ifelse(nrow(cand_seq_t) == 1, paste(gridseq_ocTU$sequenceID[i], cand_seq_t$sequenceID[1], sep = ","),
+                                            paste(gridseq_ocTU$sequenceID[i], cand_seq_t$sequenceID[1], cand_seq_t$sequenceID[2], sep = ","))
+          cooccurrences_TU[nrow(cooccurrences_TU) +1,] <- c(gridseq_ocTU$cooc_ID[i], paste(gridseq_ocTU$seq_start[i]), paste(gridseq_ocTU$seqday[i]), paste(gridseq_ocTU$locationfactor[i]), 
+                                                            paste(cand_seq_t$locationfactor[1]), paste(cand_seq_t$locationfactor[2]), cand_seq_t$value[1], cand_seq_t$value[2], nrow(cand_seq_t), gridseq_ocTU$n[i], 
+                                                            cand_seq_t$n[1], cand_seq_t$n[2], gridseq_ocTU$nAdult[i], cand_seq_t$nAdult[1], cand_seq_t$nAdult[2],gridseq_ocTU$nSubadult[i], cand_seq_t$nSubadult[1], 
+                                                            cand_seq_t$nSubadult[2], gridseq_ocTU$nJuvenile[i], cand_seq_t$nJuvenile[1], cand_seq_t$nJuvenile[2], gridseq_ocTU$nUU[i], cand_seq_t$nUU[1], 
+                                                            cand_seq_t$nUU[2], paste(gridseq_ocTU$tooluse[i]), paste(cand_seq_t$tooluse[1]), paste(cand_seq_t$tooluse[2]))
+        }
+      }
+    }
+  }
+  print(i)
+}
+
+cooccurrences_TU <- cooccurrences_TU[-1,]
+cooccurrences_TU[,7:22] <- as.numeric(unlist(cooccurrences_TU[,7:22]))
+
+hist(cooccurrences_TU$distcam12)
+
+## NTU 
+gridseq_ocNTU <- gridseq_ocf[gridseq_ocf$gridtype == "NTU",]
+
+# distance matrix is already made
+NTUdistmat
+
+# make blank co-occurrence info data frame
+gridseq_ocNTU$cooccurrence <- 0
+gridseq_ocNTU$cooc_ID <- NA
+
+cooccurrences_NTU <- data.frame(cooc_ID = "seqid", seqstart = NA, seqday = NA, cam1 = NA, cam2 = NA, cam3 =NA, distcam12 = 0, distcam13 = 0, nrseq = 0, nrcap_1 = 0, nrcap_2 = 0, nrcap_3 = 0,
+                                nAdult_1 = 0, nAdult_2 = 0, nAdult_3 = 0, nSubadult_1 = 0, nSubadult_2 = 0, nSubadult_3 = 0, nJuvenile_1 = 0, nJuvenile_2 = 0,
+                                nJuvenile_3 = 0, nUU_1 = 0, nUU_2 = 0, nUU_3 = 0, tooluse_1 = NA, tooluse_2 = NA, tooluse_3 = NA)
+
+for (i in 1:nrow(gridseq_ocNTU)) {
+  ## at beginning have some kind of check if the sequenceID is already in the co-occurence dataframe, if so can skip everything
+  if(sum(str_detect(cooccurrences_NTU$cooc_ID, paste(gridseq_ocNTU$sequenceID[i]))) == 0) {
+    dist <- as.data.frame(subset(TUdistmat_all, rownames(TUdistmat_all) %in% gridseq_ocNTU$locationfactor[i])) 
+    cand_locs <- colnames(dist[,dist > 150]) # make list of candidate locations for co-occurrence (>150 m away)
+    # filter to sequence that are at candidate location and on same day as sequence we're looking at 
+    cand_seq <- gridseq_ocNTU[gridseq_ocNTU$locationfactor %in% cand_locs & gridseq_ocNTU$seqday == gridseq_ocNTU$seqday[i], c("sequenceID", "locationfactor", "seqday", "seq_start", "seq_end", "n", "nAdult", "nJuvenile","nSubadult", "nUU", "tooluse")]
+    dist_m <- melt(dist)
+    cand_seq$locationfactor <- as.character(cand_seq$locationfactor)
+    dist_m$variable <- as.character(dist_m$variable)
+    cand_seq <- left_join(cand_seq, dist_m, by = c("locationfactor" = "variable"))
+    # see if there are any co-occurrences
+    # if there is anything, then extract information from those sequences, both add to gridseq_ocNTU dataframe, and to co-occurrence dataframe?
+    if(nrow(cand_seq) > 0) {
+      # identify the difftime cutoff for every row
+      cand_seq$cutoff <- disttime2$time[findInterval(cand_seq$value, disttime2$distance)]
+      cand_seq$flag <- ifelse(abs(difftime(gridseq_ocNTU$seq_start[i], cand_seq$seq_start, unit = "s")) < cand_seq$cutoff, 1, 0)
+      if(sum(cand_seq$flag) > 0)  {
+        cand_seq$dtime <- difftime(gridseq_ocNTU$seq_start[i], cand_seq$seq_start, unit = "s")
+        cand_seq_t <- cand_seq[cand_seq$flag == 1,]
+        cand_seq_t <- cand_seq_t[!duplicated(cand_seq_t$locationfactor),]
+        if(nrow(cand_seq_t) > 0) {
+          gridseq_ocNTU$cooccurrence <- 1
+          gridseq_ocNTU$cooc_ID[i] <- ifelse(nrow(cand_seq_t) == 1, paste(gridseq_ocNTU$sequenceID[i], cand_seq_t$sequenceID[1], sep = ","),
+                                             paste(gridseq_ocNTU$sequenceID[i], cand_seq_t$sequenceID[1], cand_seq_t$sequenceID[2], sep = ","))
+          cooccurrences_NTU[nrow(cooccurrences_NTU) +1,] <- c(gridseq_ocNTU$cooc_ID[i], paste(gridseq_ocNTU$seq_start[i]), paste(gridseq_ocNTU$seqday[i]), paste(gridseq_ocNTU$locationfactor[i]), 
+                                                              paste(cand_seq_t$locationfactor[1]), paste(cand_seq_t$locationfactor[2]), cand_seq_t$value[1], cand_seq_t$value[2], nrow(cand_seq_t), gridseq_ocNTU$n[i], 
+                                                              cand_seq_t$n[1], cand_seq_t$n[2], gridseq_ocNTU$nAdult[i], cand_seq_t$nAdult[1], cand_seq_t$nAdult[2],gridseq_ocNTU$nSubadult[i], cand_seq_t$nSubadult[1], 
+                                                              cand_seq_t$nSubadult[2], gridseq_ocNTU$nJuvenile[i], cand_seq_t$nJuvenile[1], cand_seq_t$nJuvenile[2], gridseq_ocNTU$nUU[i], cand_seq_t$nUU[1], 
+                                                              cand_seq_t$nUU[2], paste(gridseq_ocNTU$tooluse[i]), paste(cand_seq_t$tooluse[1]), paste(cand_seq_t$tooluse[2]))
+        }
+      }
+    }
+  }
+  print(i)
+}
+
+cooccurrences_NTU <- cooccurrences_NTU[-1,]
+cooccurrences_NTU[,7:22] <- as.numeric(unlist(cooccurrences_NTU[,7:22]))
+
+hist(cooccurrences_NTU$distcam12)
+
+
+### Visualizing detections #####
+
+
+
+######## MAP ############
+library(mapview)
+library(rgdal)
+library(sf)
+
+camcoords <- gridsequence[!duplicated(gridsequence$locationName), c("locationName", "longitude", "latitude")]
+all_cams <- st_as_sf(camcoords , coords = c("longitude", "latitude"), crs = 4326) #do it again if rading csv
+all_cams_map <- mapview(all_cams , col.regions="black"  )
+all_cams_map
+
+# this looks like it should work 
+# https://stackoverflow.com/questions/68450668/how-can-i-animate-points-on-a-spatial-map-with-gganimate-sf-and-ggplot2
+# or this
+# https://stackoverflow.com/questions/41666472/maps-animation-in-r
+# https://medium.com/@cbkwgl/animating-markers-on-maps-the-r-way-4e1f04accf9f 
+
 
 # trying out looking at explicitly spatial model
 
@@ -1763,13 +1463,3 @@ ggplot(data = gridseq_ocNTUc[!gridseq_ocNTUc$obsnumber == 1,], aes(x = space, y 
 # plot real data as points to get idea of where data is
 
 
-
-######## MAP ############
-library(mapview)
-library(rgdal)
-library(sf)
-
-camcoords <- gridsequence[!duplicated(gridsequence$locationName), c("locationName", "longitude", "latitude")]
-all_cams <- st_as_sf(camcoords , coords = c("longitude", "latitude"), crs = 4326) #do it again if rading csv
-all_cams_map <- mapview(all_cams , col.regions="black"  )
-all_cams_map
