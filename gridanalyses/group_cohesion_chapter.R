@@ -30,19 +30,13 @@ library(sf)
 library(fitdistrplus)
 library(ggeffects)
 
-# STILL DO
-# PRIOR SIMULATIONS AND SET MY PRIORS
-# RUN FINAL MODELS WITH 3 CHAINS 3000 ITERATIONS AND ADD_CRITERION ETC
-
-
-
 ##### DIAGNOSTICS & FILTERING ####
 # Load in grid data
 # observation level dataframe
-gridclean <- read.csv("gridanalyses/RDS/gridclean.csv")
+gridclean <- readRDS("gridanalyses/gridclean.RDS")
 ftable(gridclean$locationName)
 # sequence level dataframe
-gridsequence <- read.csv("gridanalyses/RDS/gridsequence.csv")
+gridsequence <- readRDS("gridanalyses/gridsequence.RDS")
 ftable(gridsequence$locationName)
 
 ## exclude grid cameras that are blank due to malfunctions
@@ -356,7 +350,10 @@ sps_bm1a <-  brm(bf(partysize ~ gridtype + (1|locationfactor) + offset(log(deple
 summary(sps_bm1a)
 plot(sps_bm1a)
 plot(conditional_effects(sps_bm1a))
-pp_check(sps_bm1a)
+# compare TU and NTU 
+# look into types of plotting + plotting on a single figure
+# supplemental or main text figure
+pp_check(sps_bm1a, type = "bars_grouped", group = "gridtype", ndraws = 100)
 
 loo(sps_bm1a) 
 loo_R2(sps_bm1a) # 0.07
@@ -638,8 +635,12 @@ rownames(NTUdistmat) <- NTUgridcams$locationfactor
 colnames(NTUdistmat) <- NTUgridcams$locationfactor
 NTUdistmat
 
-###### Gaussian Processes: TU ####
+###### Gaussian Processes ####
 
+# examining how variance of party sizes decays as a function of the distance between camera trap locations
+# so purely spatial component, not temporal included
+
+# separate models for TU and NTU groups
 dTU <- gridseq_ocf[gridseq_ocf$gridtype == "TU",]
 dTU <- droplevels.data.frame(dTU)
 dTU$locationfactor <- as.factor(dTU$locationfactor)
@@ -660,31 +661,16 @@ require(rethinking)
 TUdistmat2 <- round(TUdistmat/100,2)
 NTUdistmat2 <- round(NTUdistmat/100,2)
 
-## Poisson (just count of capuchins no offset of sequence length) ##
-## work with number of capuchins per sequence (poisson). 
-
-## without 0s
-
-### Tool-users
-
-# one row per camera. 
-dTU_total <- aggregate(list(n = dTU$n, seq_length = dTU$seq_length), by = list(camera = dTU$camera, long = dTU$longitude, lat = dTU$latitude,  location = dTU$locationName), FUN = "sum")
-## add distance to coast per camera
-# REMOVE THIS??
-dist2coast_all <- read.csv("tide_analysis/allcams_gps.csv", header = TRUE)
-dist2coast_all <- dist2coast_all[ , c(2,5)]
-
-dTU_total <- left_join(dTU_total, dist2coast_all, by = c("location" = "camera_id"))
-#standardize
-dTU_total$distcoast_z <- as.numeric(scale(dTU_total$distcoast, center = TRUE, scale = TRUE))
-
+# filter dataframe to columns we need
+gp_dTU <- dTU[,c("n", "seq_length", "camera", "locationName", "longitude", "latitude", "deplengthhours")]
 ## IMPORTANT, HAVE ONE SEQUENCE 01b1e2b3-3a65-4165-a1ed-088f903de735 with a seq_length of 0, because it is only one picture.
 # for now just make it last 1 second
-dTU$seq_length[dTU$seq_length == 0] <- 1
-dTU_meannumber <- aggregate(dTU$n, by = list(camera = dTU$camera, long = dTU$longitude, lat = dTU$latitude, location = dTU$locationName), FUN = "mean")
-# for later model with capuchins per second (offset sequence length)
-dTU$rate <- dTU$n/dTU$seq_length
-dTU_meanrate <- aggregate(dTU$rate, by = list(camera = dTU$camera,  long = dTU$longitude, lat = dTU$latitude,  location = dTU$locationName), FUN = "mean")
+gp_dTU$seq_length[gp_dTU$seq_length == 0] <- 1
+gp_dNTU <- dNTU[,c("n", "seq_length", "camera", "locationName", "longitude", "latitude", "deplengthhours")]
+
+# aggregated dataframe for plotting
+dTU_total <- aggregate(list(n = dTU$n, seq_length = dTU$seq_length), by = list(camera = dTU$camera, long = dTU$longitude, lat = dTU$latitude,  location = dTU$locationName), FUN = "sum")
+dNTU_total <- aggregate(list(n = dNTU$n, seq_length = dNTU$seq_length), by = list(camera = dNTU$camera, long = dNTU$longitude, lat = dNTU$latitude,  location = dNTU$locationName), FUN = "sum")
 
 ## first just model the spatial covariance, null-model without any predictors
 # simulate priors
@@ -702,11 +688,12 @@ for(i in 1:n){
         col = col.alpha(2,0.5))
 }
 
+#### Gaussian processes model 1: TU group #
 
-dat_list <- list(
-  N = dTU$n,
-  C = dTU$camera,
-  D = TUdistmat2 )
+dat_list_TU <- list(
+  N = gp_dTU$n, # number of capuchins in sequence
+  C = gp_dTU$camera, # camera index
+  D = TUdistmat2) # matrix with distances between cameras
 
 mTdist_TU <- ulam(
   alist(
@@ -717,7 +704,7 @@ mTdist_TU <- ulam(
     abar ~ normal(3, 0.5),
     etasq ~ dexp(2),
     rhosq ~ dexp(0.5)
-  ), data = dat_list, chains = 4, cores = 4, iter = 4000)
+  ), data = dat_list_TU, chains = 4, cores = 4, iter = 4000)
 
 # save and load model
 #saveRDS(mTdist_TU, "gridanalyses/RDS/mTdist_TU.rds")
@@ -726,198 +713,14 @@ mTdist_TU <- ulam(
 precis(mTdist_TU, 2)
 
 # visualize posterior
-post <- extract.samples(mTdist_TU)
+postTU <- extract.samples(mTdist_TU)
 
-# plot posterior median covariance function
-plot(NULL, xlab = "distance (hundred m)", ylab = "covariance",
-     xlim = c(0,10), ylim = c(0,3))
+#### Gaussian processes model 1: NTU group #
 
-# compute posterior mean covariance
-x_seq <- seq(from=0, to = 10, length.out = 100)
-pmcov <- sapply(x_seq, function(x) post$etasq*exp(-post$rhosq*x^2))
-pmcov_mu <- apply(pmcov, 2, mean)
-lines(x_seq, pmcov_mu, lwd = 3)
-
-# prior in black
-for(i in 1:n){
-  curve(etasq[i]*exp(-rhosq[i]*x^2),
-        add = TRUE, lwd = 2,
-        col = col.alpha("black",0.25))
-}
-
-# plot 60 functions sampled from the posterior
-for (i in 1:50) {
-  curve( post$etasq[i]*exp(-post$rhosq[i]*x^2) , add=TRUE , lwd = 2,
-         col=col.alpha("red",0.5) )
-}
-
-# compute posterior median covariance among societies
-K <- matrix(0, nrow = 24, ncol = 24)
-for (i in 1:24)
-  for (j in 1:24)
-    K[i,j] <- median(post$etasq) *
-  exp( - median(post$rhosq) * TUdistmat2[i,j]^2)
-diag(K) <- median(post$etasq) + 0.01
-
-# convert to correlation matrix
-Rho <- round(cov2cor(K), 2)
-# add row/col names for convenience
-colnames(Rho) <- colnames(TUdistmat2)
-rownames(Rho) <- colnames(Rho)
-
-# plot raw data and labels
-plot(dTU_total$long , dTU_total$lat , xlab="longitude" , ylab="latitude" ,
-     col="red"  , pch=16, xlim = c(-81.824, -81.815))
-labels <- as.character(dTU_total$location)
-text( dTU_total$long , dTU_total$lat , labels=labels , cex=0.7 , pos=c(2,4,3,3,4,1,3,2,4,2) )
-# overlay lines shaded by Rho
-for( i in 1:24 )
-  for ( j in 1:24 )
-    if ( i < j )
-      lines( c( dTU_total$long[i],dTU_total$long[j] ) , c( dTU_total$lat[i],dTU_total$lat[j] ) ,
-             lwd=2 , col=col.alpha("black",Rho[i,j]^2) )
-
-## including "population", in our case, total sequence length
-dat_list <- list(
-  N = dTU$n,
-  C = dTU$camera,
-  P = dTU$seq_length,
-  D = TUdistmat2 )
-
-mTdist_TU2 <- ulam(
-  alist(
-    N ~ dpois(lambda),
-    lambda <- (abar*P^b/g)*exp(a[C]),
-    vector[24]:a ~ multi_normal(0, K),
-    transpars>matrix[24,24]:K <- 
-      cov_GPL2(D, etasq, rhosq, 0.01),
-    c(abar, b,g) ~ dexp(1),
-    etasq ~ dexp(2),
-    rhosq ~ dexp(0.5)
-  ), data = dat_list, chains = 4, cores = 4, iter = 4000)
-
-# save and load model
-#saveRDS(mTdist_TU2, "gridanalyses/RDS/mTdist_TU2.rds")
-#mTdist_TU2 <- readRDS("gridanalyses/RDS/mTdist_TU2.rds")
-
-precis(mTdist_TU2, 3)
-
-# visualize posterior
-post2 <- extract.samples(mTdist_TU2)
-
-# plot posterior median covariance function
-plot(NULL, xlab = "distance (hundred m)", ylab = "covariance",
-     xlim = c(0,10), ylim = c(0,3))
-
-# compute posterior mean covariance
-x_seq <- seq(from=0, to = 10, length.out = 100)
-pmcov <- sapply(x_seq, function(x) post2$etasq*exp(-post2$rhosq*x^2))
-pmcov_mu <- apply(pmcov, 2, mean)
-lines(x_seq, pmcov_mu, lwd = 3)
-
-# prior in black
-for(i in 1:n){
-  curve(etasq[i]*exp(-rhosq[i]*x^2),
-        add = TRUE, lwd = 2,
-        col = col.alpha("black",0.25))
-}
-
-## null model in blue
-for (i in 1:50) {
-  curve( post$etasq[i]*exp(-post$rhosq[i]*x^2) , add=TRUE , lwd = 2,
-         col=col.alpha("blue",0.5) )
-}
-
-# plot 60 functions sampled from the posterior
-for (i in 1:50) {
-  curve( post2$etasq[i]*exp(-post2$rhosq[i]*x^2) , add=TRUE , lwd = 2,
-         col=col.alpha("red",0.5) )
-}
-
-# compute posterior median covariance among societies
-K <- matrix(0, nrow = 24, ncol = 24)
-for (i in 1:24)
-  for (j in 1:24)
-    K[i,j] <- median(post2$etasq) *
-  exp( - median(post2$rhosq) * TUdistmat2[i,j]^2)
-diag(K) <- median(post2$etasq) + 0.01
-
-# convert to correlation matrix
-Rho <- round(cov2cor(K), 2)
-# add row/col names for convenience
-colnames(Rho) <- colnames(TUdistmat2)
-rownames(Rho) <- colnames(Rho)
-
-# plot raw data and labels
-plot(dTU_total$long , dTU_total$lat , xlab="longitude" , ylab="latitude" ,
-     col="red"  , pch=16, xlim = c(-81.824, -81.815))
-labels <- as.character(dTU_total$location)
-text( dTU_total$long , dTU_total$lat , labels=labels , cex=0.7 , pos=c(2,4,3,3,4,1,3,2,4,2) )
-# overlay lines shaded by Rho
-for( i in 1:24 )
-  for ( j in 1:24 )
-    if ( i < j )
-      lines( c( dTU_total$long[i],dTU_total$long[j] ) , c( dTU_total$lat[i],dTU_total$lat[j] ) ,
-             lwd=2 , col=col.alpha("black",Rho[i,j]^2) )
-
-# now on log seqlength scale , still want to make this plot
-# youtube video https://www.youtube.com/watch?v=PIuqxOBJqLU around 35:00
-# statistical rethinking around page 475 (figure 14.12)
-# compute posterior median relationship, ignoring distance 
-max(log(dTU_total$seq_length))
-
-# something goes wrong with code below
-logpop.seq <- seq( from=4 , to=9 , length.out=30 )
-lambda <- sapply( logpop.seq , function(lp) exp( post2$a + post2$bp*lp ) )
-lambda.median <- apply( lambda , 2 , median )
-lambda.PI80 <- apply( lambda , 2 , PI , prob=0.8 )
-# plot raw data and labels
-plot( d$logpop , d$total_tools , col=rangi2 , cex=psize , pch=16 ,
-      xlab="log population" , ylab="total tools" )
-text( d$logpop , d$total_tools , labels=labels , cex=0.7 ,
-      pos=c(4,3,4,2,2,1,4,4,4,2) )
-# display posterior predictions
-lines( logpop.seq , lambda.median , lty=2 )
-lines( logpop.seq , lambda.PI80[1,] , lty=2 )
-lines( logpop.seq , lambda.PI80[2,] , lty=2 )
-# overlay correlations
-for( i in 1:10 )
-  for ( j in 1:10 )
-    if ( i < j )
-      lines( c( d$logpop[i],d$logpop[j] ) ,
-             c( d$total_tools[i],d$total_tools[j] ) ,
-             lwd=2 , col=col.alpha("black",Rho[i,j]^2) )
-
-## including distance to coast as predictor
-dat_list <- list(
-  N = dTU_total$n,
-  C = 1:24,
-  P = dTU_total$seq_length,
-  D = TUdistmat2,
-  X = dTU_total$distcoast_z)
-
-###### Gaussian Processes: NTU ####
-
-### Non-tool-users
-dNTU_total <- aggregate(list(n = dNTU$n, seq_length = dNTU$seq_length), by = list(camera = dNTU$camera, long = dNTU$longitude, lat = dNTU$latitude,  location = dNTU$locationName), FUN = "sum")
-
-dNTU_total <- left_join(dNTU_total, dist2coast_all, by = c("location" = "camera_id"))
-#standardize
-dNTU_total$distcoast_z <- as.numeric(scale(dNTU_total$distcoast, center = TRUE, scale = TRUE))
-
-# more accurate would be average number of capuchins/rate. So this would be a gamma. Try that too
-# could do average number of capuchins seen? over all sequences?
-dNTU_meannumber <- aggregate(dNTU$n, by = list(camera = dNTU$camera, long = dNTU$longitude, lat = dNTU$latitude, location = dNTU$locationName), FUN = "mean")
-# later would probably need to do something like "capuchins per second"
-dNTU$rate <- dNTU$n/dNTU$seq_length
-dNTU_meanrate <- aggregate(dNTU$rate, by = list(camera = dNTU$camera,  long = dNTU$longitude, lat = dNTU$latitude,  location = dNTU$locationName), FUN = "mean")
-
-## first just model the spatial covariance, null-model without any predictors
-# simulate priors
-dat_list <- list(
-  N = dNTU$n,
-  C = dNTU$camera,
-  D = NTUdistmat2 )
+dat_list_NTU <- list(
+  N = gp_dNTU$n,
+  C = gp_dNTU$camera,
+  D = NTUdistmat2)
 
 mTdist_NTU <- ulam(
   alist(
@@ -928,7 +731,7 @@ mTdist_NTU <- ulam(
     abar ~ normal(3, 0.5),
     etasq ~ dexp(2),
     rhosq ~ dexp(0.5)
-  ), data = dat_list, chains = 4, cores = 4, iter = 4000)
+  ), data = dat_list_NTU, chains = 4, cores = 4, iter = 4000)
 
 # save and load model
 #saveRDS(mTdist_NTU, "gridanalyses/RDS/mTdist_NTU.rds")
@@ -937,236 +740,273 @@ mTdist_NTU <- ulam(
 precis(mTdist_NTU, 2)
 
 # visualize posterior
-post <- extract.samples(mTdist_NTU)
+postNTU <- extract.samples(mTdist_NTU)
 
 # plot posterior median covariance function
+#png("gridanalyses/RDS/gaussianprocesses_covariance.png", width = 8, height = 7, units = 'in', res = 300)
 plot(NULL, xlab = "distance (hundred m)", ylab = "covariance",
      xlim = c(0,10), ylim = c(0,2))
 
-# compute posterior mean covariance
+# plot 60 functions sampled from the posterior TU
+for (i in 1:50) {
+  curve( postTU$etasq[i]*exp(-postTU$rhosq[i]*x^2) , add=TRUE , lwd = 2,
+         col=col.alpha("#C8800F",0.1) )
+}
+
+# plot 60 functions sampled from the posterior TU
+for (i in 1:50) {
+  curve( postNTU$etasq[i]*exp(-postNTU$rhosq[i]*x^2) , add=TRUE , lwd = 2,
+         col=col.alpha("#81A956",0.1) )
+}
+
+# compute posterior mean covariance TU
 x_seq <- seq(from=0, to = 10, length.out = 100)
-pmcov <- sapply(x_seq, function(x) post$etasq*exp(-post$rhosq*x^2))
-pmcov_mu <- apply(pmcov, 2, mean)
-lines(x_seq, pmcov_mu, lwd = 3)
+pmcovTU <- sapply(x_seq, function(x) postTU$etasq*exp(-postTU$rhosq*x^2))
+pmcovTU_mu <- apply(pmcovTU, 2, mean)
+lines(x_seq, pmcovTU_mu, lwd = 3, col = "#C8800F")
 
-# prior in black
-for(i in 1:n){
-  curve(etasq[i]*exp(-rhosq[i]*x^2),
-        add = TRUE, lwd = 2,
-        col = col.alpha("black",0.25))
-}
+# compute posterior mean covariance NTU
+pmcovNTU <- sapply(x_seq, function(x) postNTU$etasq*exp(-postNTU$rhosq*x^2))
+pmcovNTU_mu <- apply(pmcovNTU, 2, mean)
+lines(x_seq, pmcovNTU_mu, lwd = 3, col = "#81A956")
+legend(x = "topright", legend = c("Tool-using group", "Non-tool-using group"), 
+       fill = c("#C8800F", "#81A956"))
+#dev.off()
 
-# plot 60 functions sampled from the posterior
-for (i in 1:50) {
-  curve( post$etasq[i]*exp(-post$rhosq[i]*x^2) , add=TRUE , lwd = 2,
-         col=col.alpha("red",0.5) )
-}
-
-# compute posterior median covariance among societies
-K <- matrix(0, nrow = 25, ncol = 25)
-for (i in 1:25)
-  for (j in 1:25)
-    K[i,j] <- median(post$etasq) *
-  exp( - median(post$rhosq) * NTUdistmat2[i,j]^2)
-diag(K) <- median(post$etasq) + 0.01
-
-# convert to correlation matrix
-Rho <- round(cov2cor(K), 2)
-# add row/col names for convenience
-colnames(Rho) <- colnames(NTUdistmat2)
-rownames(Rho) <- colnames(Rho)
-
-# plot raw data and labels
-plot(dNTU_total$long , dNTU_total$lat , xlab="longitude" , ylab="latitude" ,
-     col="red"  , pch=16, xlim = c(-81.798, -81.790))
-labels <- as.character(dNTU_total$location)
-text( dNTU_total$long , dNTU_total$lat , labels=labels , cex=0.7 , pos=c(2,4,3,3,4,1,3,2,4,2) )
-# overlay lines shaded by Rho
-for( i in 1:25 )
-  for ( j in 1:25 )
-    if ( i < j )
-      lines( c( dNTU_total$long[i],dNTU_total$long[j] ) , c( dNTU_total$lat[i],dNTU_total$lat[j] ) ,
-             lwd=2 , col=col.alpha("black",Rho[i,j]^2) )
-
-
-## including "population", in our case, total sequence length
-dat_list <- list(
-  N = dNTU$n,
-  C = dNTU$camera,
-  P = dNTU$seq_length,
-  D = NTUdistmat2 )
-
-mTdist_NTU2 <- ulam(
-  alist(
-    N ~ dpois(lambda),
-    lambda <- (abar*P^b/g)*exp(a[C]),
-    vector[25]:a ~ multi_normal(0, K),
-    transpars>matrix[25,25]:K <- 
-      cov_GPL2(D, etasq, rhosq, 0.01),
-    c(abar, b,g) ~ dexp(1),
-    etasq ~ dexp(2),
-    rhosq ~ dexp(0.5)
-  ), data = dat_list, chains = 4, cores = 4, iter = 4000)
-
-#saveRDS(mTdist_NTU2, "gridanalyses/RDS/mTdist_NTU2.rds")
-#mTdist_NTU2 <- readRDS("gridanalyses/RDS/mTdist_NTU2.rds")
-
-precis(mTdist_NTU2, 2)
-
-# visualize posterior
-post2 <- extract.samples(mTdist_NTU2)
-
-# plot posterior median covariance function
-plot(NULL, xlab = "distance (hundred m)", ylab = "covariance",
-     xlim = c(0,10), ylim = c(0,2))
-
-# compute posterior mean covariance
-x_seq <- seq(from=0, to = 10, length.out = 100)
-pmcov <- sapply(x_seq, function(x) post2$etasq*exp(-post2$rhosq*x^2))
-pmcov_mu <- apply(pmcov, 2, mean)
-lines(x_seq, pmcov_mu, lwd = 3)
-
-# prior in black
-for(i in 1:n){
-  curve(etasq[i]*exp(-rhosq[i]*x^2),
-        add = TRUE, lwd = 2,
-        col = col.alpha("black",0.25))
-}
-
-## null model in blue
-for (i in 1:50) {
-  curve( post$etasq[i]*exp(-post$rhosq[i]*x^2) , add=TRUE , lwd = 2,
-         col=col.alpha("blue",0.5) )
-}
-
-# plot 60 functions sampled from the posterior
-for (i in 1:50) {
-  curve( post2$etasq[i]*exp(-post2$rhosq[i]*x^2) , add=TRUE , lwd = 2,
-         col=col.alpha("red",0.5) )
-}
-
-# compute posterior median covariance among societies
-K <- matrix(0, nrow = 25, ncol = 25)
-for (i in 1:25)
-  for (j in 1:25)
-    K[i,j] <- median(post2$etasq) *
-  exp( - median(post2$rhosq) * NTUdistmat2[i,j]^2)
-diag(K) <- median(post2$etasq) + 0.01
-
-# convert to correlation matrix
-Rho <- round(cov2cor(K), 2)
-# add row/col names for convenience
-colnames(Rho) <- colnames(NTUdistmat2)
-rownames(Rho) <- colnames(Rho)
-
-# plot raw data and labels
-plot(dNTU_total$long , dNTU_total$lat , xlab="longitude" , ylab="latitude" ,
-     col="red"  , pch=16, xlim = c(-81.798, -81.790))
-labels <- as.character(dNTU_total$location)
-text( dNTU_total$long , dNTU_total$lat , labels=labels , cex=0.7 , pos=c(2,4,3,3,4,1,3,2,4,2) )
-# overlay lines shaded by Rho
-for( i in 1:24 )
-  for ( j in 1:24 )
-    if ( i < j )
-      lines( c( dNTU_total$long[i],dNTU_total$long[j] ) , c( dNTU_total$lat[i],dNTU_total$lat[j] ) ,
-             lwd=2 , col=col.alpha("black",Rho[i,j]^2) )
-
-# so my first interpretation of this is that including distance only already doesn't show much covariance between cameras for the NTU but does for TU
-# hmmmm
-# is then interpretation correct that for NTU close cameras are similar and far apart are not similar and for TU there is more covariance between far cameras too?
-# look at this in more detail later
-
-
-## incorporate distcoast? THINK WE SHOULD SCRAP
-
-## discuss with Brendan how to incorporate distcoast in the ulam
-# now just added bX and X to lambda but that doesn't seem to be right?
-mTdist_TU3 <- ulam(
-  alist(
-    N ~ dpois(lambda),
-    lambda <- (abar*P^b/g)*exp(a[C]) + bX*X,
-    vector[24]:a ~ multi_normal(0, K),
-    transpars>matrix[24,24]:K <- 
-      cov_GPL2(D, etasq, rhosq, 0.01),
-    c(abar, b,g) ~ dexp(1),
-    bX ~ normal(0, 0.5),
-    etasq ~ dexp(2),
-    rhosq ~ dexp(0.5)
-  ), data = dat_list, chains = 4, cores = 4, iter = 4000)
-
-precis(mTdist_TU3, 3)
-
-# visualize posterior
-post3 <- extract.samples(mTdist_TU3)
-
-# plot posterior median covariance function
-plot(NULL, xlab = "distance (hundred m)", ylab = "covariance",
-     xlim = c(0,10), ylim = c(0,2))
-
-# prior in black
-for(i in 1:n){
-  curve(etasq[i]*exp(-rhosq[i]*x^2),
-        add = TRUE, lwd = 2,
-        col = col.alpha("black",0.5))
-}
-
-## null model in blue
-for (i in 1:50) {
-  curve( post$etasq[i]*exp(-post$rhosq[i]*x^2) , add=TRUE , lwd = 2,
-         col=col.alpha("blue",0.5) )
-}
-
-# population added
-for (i in 1:50) {
-  curve( post2$etasq[i]*exp(-post2$rhosq[i]*x^2) , add=TRUE , lwd = 2,
-         col=col.alpha("red",0.5) )
-}
-
-# population and distcoast
-for (i in 1:50) {
-  curve( post3$etasq[i]*exp(-post3$rhosq[i]*x^2) , add=TRUE , lwd = 2,
-         col=col.alpha("green",0.5) )
-}
-
-# compute posterior median covariance among societies
-K <- matrix(0, nrow = 24, ncol = 24)
+## Plot with  covariance between all cameras
+# compute posterior median covariance among cameras
+# TU
+KTU <- matrix(0, nrow = 24, ncol = 24)
 for (i in 1:24)
   for (j in 1:24)
-    K[i,j] <- median(post3$etasq) *
-  exp( - median(post3$rhosq) * TUdistmat2[i,j]^2)
-diag(K) <- median(post3$etasq) + 0.01
+    KTU[i,j] <- median(postTU$etasq) *
+  exp( - median(postTU$rhosq) * TUdistmat2[i,j]^2)
+diag(KTU) <- median(postTU$etasq) + 0.01
 
 # convert to correlation matrix
-Rho <- round(cov2cor(K), 2)
+RhoTU <- round(cov2cor(KTU), 2)
 # add row/col names for convenience
-colnames(Rho) <- colnames(TUdistmat2)
-rownames(Rho) <- colnames(Rho)
+colnames(RhoTU) <- colnames(TUdistmat2)
+rownames(RhoTU) <- colnames(RhoTU)
 
-# plot raw data and labels
+# plot raw data and labels 
+#png("gridanalyses/RDS/cam_cov_TU.png", width = 8, height = 7, units = 'in', res = 300)
 plot(dTU_total$long , dTU_total$lat , xlab="longitude" , ylab="latitude" ,
-     col="red"  , pch=16, xlim = c(-81.824, -81.815))
-labels <- as.character(dTU_total$location)
-text( dTU_total$long , dTU_total$lat , labels=labels , cex=0.7 , pos=c(2,4,3,3,4,1,3,2,4,2) )
+     col="white"  , pch=16, xlim = c(-81.824, -81.815), ylim = c(7.268, 7.2755))
 # overlay lines shaded by Rho
 for( i in 1:24 )
   for ( j in 1:24 )
     if ( i < j )
       lines( c( dTU_total$long[i],dTU_total$long[j] ) , c( dTU_total$lat[i],dTU_total$lat[j] ) ,
-             lwd=2 , col=col.alpha("black",Rho[i,j]^2) )
+             lwd=2 , col=col.alpha("grey",RhoTU[i,j]) )
+points(dTU_total$long , dTU_total$lat , xlab="longitude" , ylab="latitude" ,
+     col="#C8800F"  , pch=16, cex = 2)
+labels <- as.character(dTU_total$location)
+text( dTU_total$long , dTU_total$lat , labels=labels , cex=0.7 , pos=c(2,4,3,3,4,1,3,2,4,2) )
+#dev.off()
 
-# not sure how to measure if distcoast affects covariance?
+# NTU
+KNTU <- matrix(0, nrow = 25, ncol = 25)
+for (i in 1:25)
+  for (j in 1:25)
+    KNTU[i,j] <- median(postNTU$etasq) *
+  exp( - median(postNTU$rhosq) * NTUdistmat2[i,j]^2)
+diag(KNTU) <- median(postNTU$etasq) + 0.01
 
+# convert to correlation matrix
+RhoNTU <- round(cov2cor(KNTU), 2)
+# add row/col names for convenience
+colnames(RhoNTU) <- colnames(NTUdistmat2)
+rownames(RhoNTU) <- colnames(RhoNTU)
+
+#png("gridanalyses/RDS/cam_cov_NTU.png", width = 8, height = 7, units = 'in', res = 300)
+plot(dNTU_total$long , dNTU_total$lat , xlab="longitude" , ylab="latitude" ,
+     col="white"  , pch=16, xlim = c(-81.798, -81.790), ylim = c(7.253, 7.260))
+# overlay lines shaded by Rho
+for( i in 1:24 )
+  for ( j in 1:24 )
+    if ( i < j )
+      lines( c( dNTU_total$long[i],dNTU_total$long[j] ) , c( dNTU_total$lat[i],dNTU_total$lat[j] ) ,
+             lwd=2 , col=col.alpha("grey",RhoNTU[i,j]) )
+points(dNTU_total$long , dNTU_total$lat , xlab="longitude" , ylab="latitude" ,
+       col="#81A956"  , pch=16, cex = 2)
+labels <- as.character(dNTU_total$location)
+text( dNTU_total$long , dNTU_total$lat , labels=labels , cex=0.7 , pos=c(2,4,3,3,4,1,3,2,4,2) )
+#dev.off()
+
+
+
+###### Covariance in space and time ####
+# within a day
+# consider how far away each subsequent sequence detection is from previous one in both space and time
+
+# need
+TUdistmat
+NTUdistmat
+gridseq_ocTU <- gridseq_ocf[gridseq_ocf$gridtype == "TU",]
+gridseq_ocNTU <- gridseq_ocf[gridseq_ocf$gridtype == "NTU",]
+head(gridseq_ocTU)
+head(gridseq_ocNTU)
+
+# this is all capuchin sightings of TU and NTU grid with unfamiliars removed (important!)
+
+# step one: order chronologically
+gridseq_ocTUc <- gridseq_ocTU[order(gridseq_ocTU$seq_start),]  
+gridseq_ocNTUc <- gridseq_ocNTU[order(gridseq_ocNTU$seq_start),]
+
+# make variable of distance (meters) to previous observation
+# make blank variable
+gridseq_ocTUc$space <- NA
+
+for(i in 2:nrow(gridseq_ocTUc)) {
+  gridseq_ocTUc$space[i] <- TUdistmat[row.names(TUdistmat) == gridseq_ocTUc$locationName[i], colnames(TUdistmat) == gridseq_ocTUc$locationName[i-1]]
+}
+
+gridseq_ocNTUc$space <- NA
+
+for(i in 2:nrow(gridseq_ocNTUc)) {
+  gridseq_ocNTUc$space[i] <- NTUdistmat[row.names(NTUdistmat) == gridseq_ocNTUc$locationName[i], colnames(NTUdistmat) == gridseq_ocNTUc$locationName[i-1]]
+}
+
+# get timestamp of the sighting (without day cause will do within day)
+gridseq_ocTUc$hms <- as_hms(as.POSIXct(gridseq_ocTUc$seq_start , tz = "America/Panama", format = "%Y-%m-%d %H:%M:%S"))
+gridseq_ocNTUc$hms <- as_hms(as.POSIXct(gridseq_ocNTUc$seq_start, tz = "America/Panama", format = "%Y-%m-%d %H:%M:%S"))
+
+# Add count what number observation is within the day
+gridseq_ocNTUc$obsnumber <- as.numeric(ave(gridseq_ocNTUc$seqday, gridseq_ocNTUc$seqday, FUN = seq_along))
+gridseq_ocTUc$obsnumber <- as.numeric(ave(gridseq_ocTUc$seqday, gridseq_ocTUc$seqday, FUN = seq_along))
+
+ggplot(data= gridseq_ocTUc[!gridseq_ocTUc$obsnumber == 1,], aes(x = obsnumber, y = space)) + geom_point() + geom_smooth() 
+ggplot(data= gridseq_ocNTUc[!gridseq_ocNTUc$obsnumber == 1,], aes(x = obsnumber, y = space)) + geom_point() + geom_smooth() 
+
+ggplot(data= gridseq_ocTUc[!gridseq_ocTUc$obsnumber == 1,], aes(x = obsnumber, y = space)) + geom_point() + geom_point(aes(col = seqday), alpha = 0.5) + 
+  stat_summary(data = gridseq_ocTUc[!gridseq_ocTUc$obsnumber == 1,], aes(x = obsnumber, y = space), fun = mean, geom = "point", inherit.aes = FALSE, size = 3, shape = 15) +
+  ggtitle("Tool-Users")
+
+ggplot(data= gridseq_ocNTUc[!gridseq_ocNTUc$obsnumber == 1,], aes(x = obsnumber, y = space)) + geom_point(aes(col = seqday), alpha = 0.5) +
+  stat_summary(data = gridseq_ocNTUc[!gridseq_ocNTUc$obsnumber == 1,], aes(x = obsnumber, y = space), fun = mean, geom = "point", inherit.aes = FALSE, size = 3, shape = 15) +
+  ggtitle("Non-tool-users")
+
+## add in TIME to previous sighting
+gridseq_ocTUc$time <- NA
+
+for(i in 2:nrow(gridseq_ocTUc)) {
+  gridseq_ocTUc$time[i] <- difftime(gridseq_ocTUc$seq_start[i],gridseq_ocTUc$seq_start[i-1], units = "m")
+}
+
+hist(gridseq_ocTUc$time)
+
+gridseq_ocNTUc$time <- NA
+
+for(i in 2:nrow(gridseq_ocNTUc)) {
+  gridseq_ocNTUc$time[i] <- difftime(gridseq_ocNTUc$seq_start[i],gridseq_ocNTUc$seq_start[i-1], units = "m")
+}
+
+hist(gridseq_ocNTUc$time)
+
+# subset to only variables we need
+gridseq_ocNTUco <- gridseq_ocNTUc[,c("seq_start", "locationName", "space", "time", "obsnumber", "hms", "seqday", "gridtype", "n", "seq_length", "deplengthhours", "longitude", "latitude", "sequenceID")]
+gridseq_ocTUco <- gridseq_ocTUc[,c("seq_start", "locationName", "space", "time", "obsnumber", "hms", "seqday", "gridtype", "n", "seq_length", "deplengthhours", "longitude", "latitude", "sequenceID")]
+
+ggplot(data= gridseq_ocTUc[!gridseq_ocTUc$obsnumber == 1,], aes(x = obsnumber, y = space)) + geom_point() + geom_point(aes(col = time), alpha = 0.3, size = 3) + 
+  stat_summary(data = gridseq_ocTUc[!gridseq_ocTUc$obsnumber == 1,], aes(x = obsnumber, y = space), fun = mean, geom = "point", inherit.aes = FALSE, size = 3, color = "red", shape = 15) +
+  ggtitle("Tool-Users") + scale_colour_viridis_c() + 
+  labs(x = "Number of consecutive observation per day", y = "Distance (meters) to previous sighting", color = "Time (seconds) to previous sighting") +
+  theme_bw() + theme(axis.text = element_text(size = 12),
+                     axis.title = element_text(size = 14)) + ylim(0,850)
+
+ggplot(data= gridseq_ocNTUc[!gridseq_ocNTUc$obsnumber == 1,], aes(x = obsnumber, y = space)) + geom_point(aes(col = time), alpha = 0.3, size = 3) +
+  stat_summary(data = gridseq_ocNTUc[!gridseq_ocNTUc$obsnumber == 1,], aes(x = obsnumber, y = space), fun = mean, geom = "point", inherit.aes = FALSE, size = 3, color = "red", shape = 15) +
+  ggtitle("Non-tool-users") +scale_colour_viridis_c() + 
+  labs(x = "Number of consecutive observation per day", y = "Distance (meters) to previous sighting", color = "Time (seconds) to previous sighting") +
+  theme_bw() + theme(axis.text = element_text(size = 12),
+                     axis.title = element_text(size = 14)) +ylim(0,850)
+
+require(viridis)
+inferncol <- viridis_pal(option = "B")(11)
+mybreaks <- seq(0, 2.2e-05, length.out = 12)
+# mybreaks <- mybreaks[c(0:10,100)]
+breaklabel <- function(x){
+  labels<- paste0(mybreaks[1:11], "-", mybreaks[2:12])
+  labels[1:x]
+}
+
+ggplot(data = gridseq_ocTUc[!gridseq_ocTUc$obsnumber == 1,], aes(x = space, y = time)) + 
+  geom_density2d_filled(breaks = mybreaks, show.legend = TRUE) + scale_fill_manual(values = inferncol, name = "Change nr of capuchins") 
+
+ggplot(data = gridseq_ocNTUc[!gridseq_ocNTUc$obsnumber == 1,], aes(x = space, y = time)) + 
+  geom_density2d_filled(show.legend = TRUE) + scale_fill_manual(values = inferncol, name = "Change nr of capuchins") 
+
+# change binning so it has above certain number all yellow and other colors for the rest
+
+ggplot(data = gridseq_ocTUco[!gridseq_ocTUco$obsnumber == 1,], aes(x = space, y = time)) + geom_point(alpha = 0.2, col = "#C8800F") +  
+  geom_point(data = gridseq_ocNTUco[!gridseq_ocNTUco$obsnumber == 1,], inherit.aes = FALSE, aes(x = space, y = time), alpha = 0.2, col = "#81A956") +
+  theme_bw()
+
+ggplot(data = gridseq_ocTUco[!gridseq_ocTUco$obsnumber == 1,], aes(x = space, y = time)) + geom_point(alpha = 0.2, col = "#C8800F") + 
+  theme_bw() + 
+ggplot(data = gridseq_ocNTUco[!gridseq_ocNTUco$obsnumber == 1,], aes(x = space, y = time)) + geom_point(alpha = 0.2, col = "#81A956") +
+  theme_bw()
+
+ggplot(data = gridseq_ocTUco[!gridseq_ocTUco$obsnumber == 1,], aes(x = space, y = time)) + stat_density_2d(geom = "raster", contour= FALSE) + 
+  scale_x_continuous(expand = c(0, 0)) +
+  scale_y_continuous(expand = c(0, 0)) +scale_fill_viridis() + 
+  theme_bw()  
+  ggplot(data = gridseq_ocNTUco[!gridseq_ocNTUco$obsnumber == 1,], aes(x = space, y = time)) + geom_point(alpha = 0.2, col = "#81A956") +
+  theme_bw()
+
+ggplot(data = gridseq_ocNTUc[!gridseq_ocNTUc$obsnumber == 1,], aes(x = space, y = time)) + 
+    geom_density2d_filled(show.legend = FALSE, alpha = 0.5) + 
+  scale_fill_manual(values = inferncol, name = "Change nr of capuchins") + 
+  geom_point(alpha = 0.8, col = "#81A956", size = 2, pch = 16) +
+  theme_bw()
+  
+ggplot(data = gridseq_ocTUc[!gridseq_ocTUc$obsnumber == 1,], aes(x = space, y = time)) + 
+  geom_density2d_filled(show.legend = FALSE, alpha = 0.5) + 
+  scale_fill_manual(values = inferncol, name = "Change nr of capuchins") + 
+  geom_point(alpha = 0.8, col ="#C8800F", size = 2, pch = 16) +
+  theme_bw()
+
+# maybe split between time between sightings within same camera, and at different cameras
+# within same camera
+# so given the next sighting is at the same camera as the previous sighting, how much time between these sightings?
+ggplot(data = gridseq_ocNTUco[gridseq_ocNTUco$space == 0 & !gridseq_ocNTUco$obsnumber == 1,], aes(x = time)) + geom_histogram() 
+ggplot(data = gridseq_ocTUco[gridseq_ocTUco$space == 0 & !gridseq_ocNTUco$obsnumber == 1,], aes(x = time)) + geom_histogram() 
+
+# if the sighting is at a different camera
+# so given the next sighting is at different camera than previous, what is relationship between time and distance between these cameras?
+ggplot(data = gridseq_ocNTUco[gridseq_ocNTUco$space > 0 & !gridseq_ocNTUco$obsnumber == 1,], aes(x = space, y = time)) + 
+  geom_density2d_filled(show.legend = FALSE, breaks = mybreaks)  +  
+  scale_fill_manual(values = inferncol, name = "Change nr of capuchins")   + ggtitle("Non-tool-users") +
+  theme_bw() +
+  ggplot(data = gridseq_ocTUco[gridseq_ocTUco$space > 0 & !gridseq_ocTUco$obsnumber == 1,], aes(x = space, y = time)) + 
+    geom_density2d_filled(show.legend = TRUE, breaks = mybreaks) +    
+  scale_fill_manual(values = inferncol, name = "Change nr of capuchins")   + ggtitle("Tool-users") +
+    theme_bw()
+
+## BEST VISUALIZATION SO FAR
+
+#png("gridanalyses/RDS/spacetime.png", width = 8, height = 7, units = 'in', res = 300)
+ggplot(data = gridseq_ocNTUco[gridseq_ocNTUco$space == 0 & !gridseq_ocNTUco$obsnumber == 1,], aes(x = time)) + geom_histogram(binwidth = 5, fill = "#81A956")  +
+  theme_bw()+ ggtitle("Subsequent sighting same camera") + labs (x = "Time to next sighting (seconds)", y = "Frequency") + xlim(0,650) + ylim(0,220) +
+  ggplot(data = gridseq_ocTUco[gridseq_ocTUco$space == 0 & !gridseq_ocTUco$obsnumber == 1,], aes(x = time)) + geom_histogram(binwidth = 5, fill = "#C8800F") +
+  theme_bw() + labs(x = "Time to next sighting (seconds)", y = NULL) +  xlim (0,650) + ylim(0,220)  + 
+ggplot(data = gridseq_ocNTUco[gridseq_ocNTUco$space > 0 & !gridseq_ocNTUco$obsnumber == 1,], aes(x = space, y = time)) + 
+  geom_point(alpha = 0.1, col = "#81A956", size = 2, pch = 16) +
+  theme_bw() + ggtitle("Subsequent sighting different camera") + labs(x = "Distance between cameras (meters)", y = "Time between sightings (seconds)") +
+  ggplot(data = gridseq_ocTUco[gridseq_ocTUco$space > 0 & !gridseq_ocTUco$obsnumber == 1,], aes(x = space, y = time)) + 
+  geom_point(alpha = 0.1, col = "#C8800F", size = 2, pch = 16) +
+  theme_bw() + labs(x = "Distance between cameras (meters)", y = NULL)
+#dev.off()
 
 ##### CO-OCCURRENCES ####
 
-# Co-occurrences within 2 min at 1050 meters
-# widening timeframe, 2 min instead of 1
+# Co-occurrences within 2 min at 150 meters
 disttime2 <- data.frame(distance = seq(150, 1020, by = 10), time = 120)
 str(disttime2)
 disttime2$time[which(disttime2$distance > 150)] <- 120 + ((disttime2$distance[which(disttime2$distance>150)]-150) * 0.8)
 
 ## TU 
-gridseq_ocTU <- gridseq_ocf[gridseq_ocf$gridtype == "TU",]
 # distance matrix is already made
 TUdistmat
 
@@ -1279,7 +1119,7 @@ hist(cooccurrences_NTU$distcam12)
 
 ### Visualizing detections #####
 
-
+# use within day dataframe to visualize one or two days?
 
 ######## MAP ############
 library(mapview)
@@ -1323,143 +1163,5 @@ frames <- frames_spatial(m,
   add_progress()
 animate_frames(frames, out_file = "Oryx.movements.mp4")
 
-####### CHRONOLOGICAL SPACE #####
-# looking how far way each subsequent sequence detection is from previous one
-
-# need
-TUdistmat
-NTUdistmat
-head(gridseq_ocTU)
-head(gridseq_ocNTU)
-
-# this is all capuchin sightings of TU and NTU grid with unfamiliars removed (important!)
-
-# step one: order chronologically
-gridseq_ocTUc <- gridseq_ocTU[order(gridseq_ocTU$seq_start),]  
-gridseq_ocNTUc <- gridseq_ocNTU[order(gridseq_ocNTU$seq_start),]
-
-# make variable of distance to previous line
-# make blank variable
-gridseq_ocTUc$space <- NA
-
-for(i in 2:nrow(gridseq_ocTUc)) {
-  gridseq_ocTUc$space[i] <- TUdistmat[row.names(TUdistmat) == gridseq_ocTUc$locationName[i], colnames(TUdistmat) == gridseq_ocTUc$locationName[i-1]]
-}
-
-ftable(gridseq_ocTUc$space)
-
-test <- gridseq_ocTUc[c("locationName", "seq_start", "space"),]
-gridseq_ocTUc$hour
-gridseq_ocTUc$hms <- as_hms(gridseq_ocTUc$seq_start)
-head(gridseq_ocTUc$hms)
-
-
-# make variable of distance to previous line
-# make blank variable
-gridseq_ocNTUc$space <- NA
-
-for(i in 2:nrow(gridseq_ocNTUc)) {
-  gridseq_ocNTUc$space[i] <- NTUdistmat[row.names(NTUdistmat) == gridseq_ocNTUc$locationName[i], colnames(NTUdistmat) == gridseq_ocNTUc$locationName[i-1]]
-}
-
-ftable(gridseq_ocNTUc$space)
-
-test <- gridseq_ocNTUc[c("locationName", "seq_start", "space"),]
-gridseq_ocNTUc$hms <- as_hms(gridseq_ocNTUc$seq_start)
-head(gridseq_ocNTUc$hms)
-ggplot(data = gridseq_ocNTUc, aes(x = hms, y = space, col = seqday)) + geom_point() 
-
-ggplot(data= gridseq_ocTUc, aes(x = hms, y = space, col = seqday)) + geom_point() + geom_smooth() 
-ggplot(data= gridseq_ocTUc, aes(x = hour, y = space, col = seqday)) +  stat_summary(data = gridseq_ocTUc, aes(x = hour, y = space), fun = mean, geom = "point", inherit.aes = FALSE) 
-ggplot(data= gridseq_ocNTUc, aes(x = hour, y = space, col = seqday)) +  stat_summary(data = gridseq_ocNTUc, aes(x = hour, y = space), fun = mean, geom = "point", inherit.aes = FALSE) 
-
-## THIS NEEDS SOME WORK. i THINK YOU ALWAYS WANT TO EXCLUDE THE FIRST ONE OF A DAY? 
-# OR SET THE FIRST ONE OF A DAY TO NA AND ONLY LOOK AT DISTANCES WITHIN A DAY?
-## need to somehow do this within a day and plot than the average of all days
-# think about this. Already interesting how it looks different though, but have to wonder why that is
-
-# maybe number observations per day and then have plotted average distance?
-gridseq_ocNTUc$obsnumber <- as.numeric(ave(gridseq_ocNTUc$seqday, gridseq_ocNTUc$seqday, FUN = seq_along))
-gridseq_ocTUc$obsnumber <- as.numeric(ave(gridseq_ocTUc$seqday, gridseq_ocTUc$seqday, FUN = seq_along))
-
-ggplot(data= gridseq_ocTUc[!gridseq_ocTUc$obsnumber == 1,], aes(x = obsnumber, y = space)) + geom_point() + geom_smooth() 
-ggplot(data= gridseq_ocNTUc[!gridseq_ocNTUc$obsnumber == 1,], aes(x = obsnumber, y = space)) + geom_point() + geom_smooth() 
-
-ggplot(data= gridseq_ocTUc[!gridseq_ocTUc$obsnumber == 1,], aes(x = obsnumber, y = space)) + geom_point() + geom_point(aes(col = seqday), alpha = 0.5) + 
-  stat_summary(data = gridseq_ocTUc[!gridseq_ocTUc$obsnumber == 1,], aes(x = obsnumber, y = space), fun = mean, geom = "point", inherit.aes = FALSE, size = 3, shape = 15) +
-  ggtitle("Tool-Users")
-
-ggplot(data= gridseq_ocNTUc[!gridseq_ocNTUc$obsnumber == 1,], aes(x = obsnumber, y = space)) + geom_point(aes(col = seqday), alpha = 0.5) +
-  stat_summary(data = gridseq_ocNTUc[!gridseq_ocNTUc$obsnumber == 1,], aes(x = obsnumber, y = space), fun = mean, geom = "point", inherit.aes = FALSE, size = 3, shape = 15) +
-  ggtitle("Non-tool-users")
-
-## add in TIME to previous sighting
-gridseq_ocTUc$time <- NA
-
-for(i in 2:nrow(gridseq_ocTUc)) {
-  gridseq_ocTUc$time[i] <- difftime(gridseq_ocTUc$seq_start[i],gridseq_ocTUc$seq_start[i-1], units = "m")
-}
-
-hist(gridseq_ocTUc$time)
-
-gridseq_ocNTUc$time <- NA
-
-for(i in 2:nrow(gridseq_ocNTUc)) {
-  gridseq_ocNTUc$time[i] <- difftime(gridseq_ocNTUc$seq_start[i],gridseq_ocNTUc$seq_start[i-1], units = "m")
-}
-
-hist(gridseq_ocNTUc$time)
-
-
-ggplot(data= gridseq_ocTUc[!gridseq_ocTUc$obsnumber == 1,], aes(x = obsnumber, y = space)) + geom_point() + geom_point(aes(col = time), alpha = 0.3, size = 3) + 
-  stat_summary(data = gridseq_ocTUc[!gridseq_ocTUc$obsnumber == 1,], aes(x = obsnumber, y = space), fun = mean, geom = "point", inherit.aes = FALSE, size = 3, color = "red", shape = 15) +
-  ggtitle("Tool-Users") + scale_colour_viridis_c() + 
-  labs(x = "Number of consecutive observation per day", y = "Distance (meters) to previous sighting", color = "Time (seconds) to previous sighting") +
-  theme_bw() + theme(axis.text = element_text(size = 12),
-                     axis.title = element_text(size = 14)) + ylim(0,850)
-
-ggplot(data= gridseq_ocNTUc[!gridseq_ocNTUc$obsnumber == 1,], aes(x = obsnumber, y = space)) + geom_point(aes(col = time), alpha = 0.3, size = 3) +
-  stat_summary(data = gridseq_ocNTUc[!gridseq_ocNTUc$obsnumber == 1,], aes(x = obsnumber, y = space), fun = mean, geom = "point", inherit.aes = FALSE, size = 3, color = "red", shape = 15) +
-  ggtitle("Non-tool-users") +scale_colour_viridis_c() + 
-  labs(x = "Number of consecutive observation per day", y = "Distance (meters) to previous sighting", color = "Time (seconds) to previous sighting") +
-  theme_bw() + theme(axis.text = element_text(size = 12),
-                     axis.title = element_text(size = 14)) +ylim(0,850)
-
-test <- gridseq_ocNTUc[c("seq_start","space","time")]
-
-require(viridis)
-inferncol <- viridis_pal(option = "B")(10)
-mybreaks <- seq(0, 0.0001, length.out = 100)
-mybreaks <- mybreaks[c(0:10,100)]
-breaklabel <- function(x){
-  labels<- paste0(mybreaks[1:10], "-", mybreaks[2:11])
-  labels[1:x]
-}
-
-
-
-head(gridseq_ocNTUc)
-ggplot(data = gridseq_ocNTUc[!gridseq_ocNTUc$obsnumber == 1 & gridseq_ocNTUc$space < 201 & gridseq_ocNTUc$time < 201,], aes(x = space, y = time)) +
-  geom_density2d()
-ggplot(data = gridseq_ocTUc[!gridseq_ocTUc$obsnumber == 1 & gridseq_ocTUc$space < 201 & gridseq_ocTUc$time < 201,], aes(x = space, y = time)) +
-  geom_density2d()
-
-ggplot(data = gridseq_ocTUc[!gridseq_ocTUc$obsnumber == 1,], aes(x = space, y = time)) + 
-  geom_density2d_filled(breaks = mybreaks, show.legend = TRUE) + scale_fill_manual(values = inferncol, name = "Change nr of capuchins") 
-
-ggplot(data = gridseq_ocNTUc[!gridseq_ocNTUc$obsnumber == 1,], aes(x = space, y = time)) + 
-  geom_density2d_filled(breaks = mybreaks, show.legend = TRUE) + scale_fill_manual(values = inferncol, name = "Change nr of capuchins") 
-
-# change binning so it has above certain number all yellow and other colors for the rest
-
-ggplot(data = gridseq_ocTUc[!gridseq_ocTUc$obsnumber == 1,], aes(x = space, y = time)) + geom_point(alpha = 0.05)
-ggplot(data = gridseq_ocNTUc[!gridseq_ocNTUc$obsnumber == 1,], aes(x = space, y = time)) + geom_point(alpha = 0.05)
-
-# color reflect frequency/intensity? 
-
-?stat_summary
-
-
-# plot real data as points to get idea of where data is
 
 
